@@ -1,0 +1,101 @@
+---
+# ServiceAccount for running the monitoring tool
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-exporter-monitor
+  namespace: node-exporter-zoneinfo
+  labels:
+    app: node-exporter-monitor
+---
+# ClusterRole with permissions to read pods and metrics
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-exporter-monitor-reader
+  labels:
+    app: node-exporter-monitor
+rules:
+# Read pods in node-exporter-zoneinfo namespace
+- apiGroups: [""]
+  resources: ["pods", "pods/status"]
+  verbs: ["get", "list", "watch"]
+# Read pods in openshift-monitoring namespace
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+# Access metrics API
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+# Read deployments and daemonsets (for verification)
+- apiGroups: ["apps"]
+  resources: ["deployments", "daemonsets", "statefulsets"]
+  verbs: ["get", "list"]
+---
+# ClusterRoleBinding to grant permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-exporter-monitor-reader
+  labels:
+    app: node-exporter-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-exporter-monitor-reader
+subjects:
+- kind: ServiceAccount
+  name: node-exporter-monitor
+  namespace: node-exporter-zoneinfo
+---
+# Optional: Role for deploying via kustomize (if using --deploy flag)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: node-exporter-monitor-deployer
+  namespace: node-exporter-zoneinfo
+  labels:
+    app: node-exporter-monitor
+rules:
+- apiGroups: [""]
+  resources: ["services", "serviceaccounts", "configmaps"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["daemonsets"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["servicemonitors"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: node-exporter-monitor-deployer
+  namespace: node-exporter-zoneinfo
+  labels:
+    app: node-exporter-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: node-exporter-monitor-deployer
+subjects:
+- kind: ServiceAccount
+  name: node-exporter-monitor
+  namespace: node-exporter-zoneinfo
+---
+# ClusterRoleBinding for privileged SCC (OpenShift specific)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-exporter-monitor-privileged
+  labels:
+    app: node-exporter-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:privileged
+subjects:
+- kind: ServiceAccount
+  name: node-exporter-monitor
+  namespace: node-exporter-zoneinfo

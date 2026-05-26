@@ -1,0 +1,89 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: node-exporter-monitor
+  namespace: node-exporter-zoneinfo
+spec:
+  # Run daily at 2 AM
+  schedule: "0 2 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: node-exporter-monitor
+          restartPolicy: OnFailure
+          containers:
+          - name: monitor
+            image: golang:1.22
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              cd /workspace
+              make build
+              ./bin/node-exporter-monitor --duration=1h --format=json
+
+              # Upload reports to persistent storage
+              if [ -d reports ]; then
+                echo "Reports generated:"
+                ls -lh reports/
+              fi
+            volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: reports
+              mountPath: /workspace/reports
+          volumes:
+          - name: workspace
+            configMap:
+              name: node-exporter-monitor-source
+          - name: reports
+            persistentVolumeClaim:
+              claimName: monitoring-reports
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-exporter-monitor
+  namespace: node-exporter-zoneinfo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-exporter-monitor
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/status"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-exporter-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-exporter-monitor
+subjects:
+- kind: ServiceAccount
+  name: node-exporter-monitor
+  namespace: node-exporter-zoneinfo
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: monitoring-reports
+  namespace: node-exporter-zoneinfo
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

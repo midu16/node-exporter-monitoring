@@ -1,0 +1,63 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+*.test
+*.out
+.claude/
+*.txt
+
+# Go workspace file
+go.work
+
+# Test binary
+node-exporter-monitor
+
+# Coverage and test results
+coverage.txt
+coverage.html
+*.coverprofile
+test-results/
+*.log
+*.txt
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Report outputs
+reports/
+*.json
+*.html
+!kustomization.yaml
+
+# Markdown files (except README.md)
+*.md
+!README.md
+
+# Kubeconfig files (sensitive)
+kubeconfig
+*.kubeconfig
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Archives
+*.tar
+*.tar.gz
+*.zip
+*.tgz
+
+# Dependencies
+vendor/
