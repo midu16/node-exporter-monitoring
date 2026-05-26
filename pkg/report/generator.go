@@ -35,94 +35,125 @@ func NewTextGeneratorWithMode(twoPhase bool) *TextGenerator {
 	return &TextGenerator{TwoPhaseMode: twoPhase}
 }
 
+// writeHelper wraps fmt.Fprintf to accumulate errors
+type writeHelper struct {
+	w   *os.File
+	err error
+}
+
+func (w *writeHelper) fprintf(format string, args ...interface{}) {
+	if w.err != nil {
+		return
+	}
+	_, w.err = fmt.Fprintf(w.w, format, args...)
+}
+
 func (g *TextGenerator) Generate(filename string, results *metrics.MonitoringResults) error {
 	f, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	w := &writeHelper{w: f}
 
 	// Use the TwoPhaseMode flag set during initialization
 	isTwoPhase := g.TwoPhaseMode
 
 	// Write header
-	fmt.Fprintf(f, "╔═══════════════════════════════════════════════════════════════════════════════╗\n")
-	fmt.Fprintf(f, "║         Node Exporter Zoneinfo - Resource Monitoring Report                  ║\n")
-	fmt.Fprintf(f, "╚═══════════════════════════════════════════════════════════════════════════════╝\n\n")
+	w.fprintf("╔═══════════════════════════════════════════════════════════════════════════════╗\n")
+	w.fprintf("║         Node Exporter Zoneinfo - Resource Monitoring Report                  ║\n")
+	w.fprintf("╚═══════════════════════════════════════════════════════════════════════════════╝\n\n")
 
 	// Monitoring period
-	fmt.Fprintf(f, "📅 Monitoring Period\n")
-	fmt.Fprintf(f, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	fmt.Fprintf(f, "  Start Time:    %s\n", results.StartTime.Format("2006-01-02 15:04:05 MST"))
-	fmt.Fprintf(f, "  End Time:      %s\n", results.EndTime.Format("2006-01-02 15:04:05 MST"))
-	fmt.Fprintf(f, "  Duration:      %v\n", results.Duration.Round(time.Second))
-	fmt.Fprintf(f, "  Samples:       %d\n", results.SampleCount)
-	fmt.Fprintf(f, "  Data Points:   %d\n", len(results.Samples))
+	w.fprintf("📅 Monitoring Period\n")
+	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	w.fprintf("  Start Time:    %s\n", results.StartTime.Format("2006-01-02 15:04:05 MST"))
+	w.fprintf("  End Time:      %s\n", results.EndTime.Format("2006-01-02 15:04:05 MST"))
+	w.fprintf("  Duration:      %v\n", results.Duration.Round(time.Second))
+	w.fprintf("  Samples:       %d\n", results.SampleCount)
+	w.fprintf("  Data Points:   %d\n", len(results.Samples))
 	if isTwoPhase {
-		fmt.Fprintf(f, "  Mode:          Two-Phase (Phase 1 + Phase 2)\n")
+		w.fprintf("  Mode:          Two-Phase (Phase 1 + Phase 2)\n")
 	}
-	fmt.Fprintf(f, "\n")
+	w.fprintf("\n")
+
+	if w.err != nil {
+		return w.err
+	}
 
 	// Calculate summary for deployment section
 	summary := CalculateSummary(results)
 
 	// Deployment summary
-	fmt.Fprintf(f, "📦 Deployment Summary\n")
-	fmt.Fprintf(f, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	w.fprintf("📦 Deployment Summary\n")
+	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
 	totalPods := make(map[string]int)
 	for ns, pods := range summary {
 		totalPods[ns] = len(pods)
 	}
 
-	fmt.Fprintf(f, "  Namespace: node-exporter-zoneinfo\n")
-	fmt.Fprintf(f, "    Pods Monitored: %d", totalPods["node-exporter-zoneinfo"])
+	w.fprintf("  Namespace: node-exporter-zoneinfo\n")
+	w.fprintf("    Pods Monitored: %d", totalPods["node-exporter-zoneinfo"])
 	if isTwoPhase {
-		fmt.Fprintf(f, " (Phase 1 only - deleted in Phase 2)")
+		w.fprintf(" (Phase 1 only - deleted in Phase 2)")
 	}
-	fmt.Fprintf(f, "\n\n")
+	w.fprintf("\n\n")
 
-	fmt.Fprintf(f, "  Namespace: openshift-monitoring\n")
-	fmt.Fprintf(f, "    Pods Monitored: %d", totalPods["openshift-monitoring"])
+	w.fprintf("  Namespace: openshift-monitoring\n")
+	w.fprintf("    Pods Monitored: %d", totalPods["openshift-monitoring"])
 	if isTwoPhase {
-		fmt.Fprintf(f, " (Both phases)")
+		w.fprintf(" (Both phases)")
 	}
-	fmt.Fprintf(f, "\n")
-	fmt.Fprintf(f, "    - Prometheus: 2 (prometheus-k8s-0, prometheus-k8s-1)\n")
-	fmt.Fprintf(f, "    - Prometheus Operator: monitored via labels\n")
-	fmt.Fprintf(f, "    - Thanos Querier: monitored via labels\n\n")
+	w.fprintf("\n")
+	w.fprintf("    - Prometheus: 2 (prometheus-k8s-0, prometheus-k8s-1)\n")
+	w.fprintf("    - Prometheus Operator: monitored via labels\n")
+	w.fprintf("    - Thanos Querier: monitored via labels\n\n")
+
+	if w.err != nil {
+		return w.err
+	}
 
 	if isTwoPhase {
 		// Generate two-phase report with separate sections
-		g.generateTwoPhaseReport(f, results)
+		if err := g.generateTwoPhaseReport(w, results); err != nil {
+			return err
+		}
 	} else {
 		// Generate standard single-phase report
-		g.generateResourceSection(f, summary, "📊 Resource Consumption Details")
+		if err := g.generateResourceSection(w, summary, "📊 Resource Consumption Details"); err != nil {
+			return err
+		}
 	}
 
 	// Errors section
 	if len(results.Errors) > 0 {
-		fmt.Fprintf(f, "\n⚠️  Errors Encountered\n")
-		fmt.Fprintf(f, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		w.fprintf("\n⚠️  Errors Encountered\n")
+		w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 		uniqueErrors := make(map[string]int)
 		for _, err := range results.Errors {
 			uniqueErrors[err]++
 		}
 		for err, count := range uniqueErrors {
-			fmt.Fprintf(f, "  [%d occurrences] %s\n", count, err)
+			w.fprintf("  [%d occurrences] %s\n", count, err)
 		}
-		fmt.Fprintf(f, "\n")
+		w.fprintf("\n")
 	}
 
 	// Footer
-	fmt.Fprintf(f, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	fmt.Fprintf(f, "Report generated: %s\n", time.Now().Format("2006-01-02 15:04:05 MST"))
-	fmt.Fprintf(f, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	w.fprintf("Report generated: %s\n", time.Now().Format("2006-01-02 15:04:05 MST"))
+	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
-	return nil
+	return w.err
 }
 
-func (g *TextGenerator) generateTwoPhaseReport(f *os.File, results *metrics.MonitoringResults) {
+func (g *TextGenerator) generateTwoPhaseReport(w *writeHelper, results *metrics.MonitoringResults) error {
 	// Calculate midpoint time
 	midpointTime := results.StartTime.Add(results.Duration / 2)
 
@@ -159,30 +190,32 @@ func (g *TextGenerator) generateTwoPhaseReport(f *os.File, results *metrics.Moni
 	}
 
 	// Generate Phase 1 section
-	fmt.Fprintf(f, "╔═══════════════════════════════════════════════════════════════════════════════╗\n")
-	fmt.Fprintf(f, "║  PHASE 1: WITH NODE-EXPORTER (First 30 minutes)                              ║\n")
-	fmt.Fprintf(f, "╚═══════════════════════════════════════════════════════════════════════════════╝\n\n")
-	fmt.Fprintf(f, "📅 Phase 1 Period\n")
-	fmt.Fprintf(f, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	fmt.Fprintf(f, "  Start Time:    %s\n", phase1Results.StartTime.Format("2006-01-02 15:04:05 MST"))
-	fmt.Fprintf(f, "  End Time:      %s\n", phase1Results.EndTime.Format("2006-01-02 15:04:05 MST"))
-	fmt.Fprintf(f, "  Duration:      %v\n", phase1Results.Duration.Round(time.Second))
-	fmt.Fprintf(f, "  Samples:       %d\n\n", len(phase1Results.Samples))
+	w.fprintf("╔═══════════════════════════════════════════════════════════════════════════════╗\n")
+	w.fprintf("║  PHASE 1: WITH NODE-EXPORTER (First 30 minutes)                              ║\n")
+	w.fprintf("╚═══════════════════════════════════════════════════════════════════════════════╝\n\n")
+	w.fprintf("📅 Phase 1 Period\n")
+	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	w.fprintf("  Start Time:    %s\n", phase1Results.StartTime.Format("2006-01-02 15:04:05 MST"))
+	w.fprintf("  End Time:      %s\n", phase1Results.EndTime.Format("2006-01-02 15:04:05 MST"))
+	w.fprintf("  Duration:      %v\n", phase1Results.Duration.Round(time.Second))
+	w.fprintf("  Samples:       %d\n\n", len(phase1Results.Samples))
 
 	phase1Summary := CalculateSummary(phase1Results)
-	g.generateResourceSection(f, phase1Summary, "📊 Phase 1 Resource Consumption")
+	if err := g.generateResourceSection(w, phase1Summary, "📊 Phase 1 Resource Consumption"); err != nil {
+		return err
+	}
 
 	// Generate Phase 2 section
-	fmt.Fprintf(f, "\n")
-	fmt.Fprintf(f, "╔═══════════════════════════════════════════════════════════════════════════════╗\n")
-	fmt.Fprintf(f, "║  PHASE 2: WITHOUT NODE-EXPORTER (Second 30 minutes)                          ║\n")
-	fmt.Fprintf(f, "╚═══════════════════════════════════════════════════════════════════════════════╝\n\n")
-	fmt.Fprintf(f, "📅 Phase 2 Period\n")
-	fmt.Fprintf(f, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	fmt.Fprintf(f, "  Start Time:    %s\n", phase2Results.StartTime.Format("2006-01-02 15:04:05 MST"))
-	fmt.Fprintf(f, "  End Time:      %s\n", phase2Results.EndTime.Format("2006-01-02 15:04:05 MST"))
-	fmt.Fprintf(f, "  Duration:      %v\n", phase2Results.Duration.Round(time.Second))
-	fmt.Fprintf(f, "  Samples:       %d\n\n", len(phase2Results.Samples))
+	w.fprintf("\n")
+	w.fprintf("╔═══════════════════════════════════════════════════════════════════════════════╗\n")
+	w.fprintf("║  PHASE 2: WITHOUT NODE-EXPORTER (Second 30 minutes)                          ║\n")
+	w.fprintf("╚═══════════════════════════════════════════════════════════════════════════════╝\n\n")
+	w.fprintf("📅 Phase 2 Period\n")
+	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	w.fprintf("  Start Time:    %s\n", phase2Results.StartTime.Format("2006-01-02 15:04:05 MST"))
+	w.fprintf("  End Time:      %s\n", phase2Results.EndTime.Format("2006-01-02 15:04:05 MST"))
+	w.fprintf("  Duration:      %v\n", phase2Results.Duration.Round(time.Second))
+	w.fprintf("  Samples:       %d\n\n", len(phase2Results.Samples))
 
 	phase2Summary := CalculateSummary(phase2Results)
 
@@ -194,12 +227,16 @@ func (g *TextGenerator) generateTwoPhaseReport(f *os.File, results *metrics.Moni
 		}
 	}
 
-	g.generateResourceSection(f, filteredPhase2Summary, "📊 Phase 2 Resource Consumption (Prometheus Operator Only)")
+	if err := g.generateResourceSection(w, filteredPhase2Summary, "📊 Phase 2 Resource Consumption (Prometheus Operator Only)"); err != nil {
+		return err
+	}
+
+	return w.err
 }
 
-func (g *TextGenerator) generateResourceSection(f *os.File, summary map[string]map[string]*PodStats, title string) {
-	fmt.Fprintf(f, "%s\n", title)
-	fmt.Fprintf(f, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+func (g *TextGenerator) generateResourceSection(w *writeHelper, summary map[string]map[string]*PodStats, title string) error {
+	w.fprintf("%s\n", title)
+	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
 	// Sort namespaces for consistent output
 	namespaces := make([]string, 0, len(summary))
@@ -210,8 +247,8 @@ func (g *TextGenerator) generateResourceSection(f *os.File, summary map[string]m
 
 	for _, ns := range namespaces {
 		pods := summary[ns]
-		fmt.Fprintf(f, "Namespace: %s\n", ns)
-		fmt.Fprintf(f, "─────────────────────────────────────────────────────────────────────────────────\n")
+		w.fprintf("Namespace: %s\n", ns)
+		w.fprintf("─────────────────────────────────────────────────────────────────────────────────\n")
 
 		// Sort pod names
 		podNames := make([]string, 0, len(pods))
@@ -223,26 +260,28 @@ func (g *TextGenerator) generateResourceSection(f *os.File, summary map[string]m
 		for _, podName := range podNames {
 			stats := pods[podName]
 			if stats.NodeName != "" {
-				fmt.Fprintf(f, "\n  Pod: %s (Node: %s)\n", podName, stats.NodeName)
+				w.fprintf("\n  Pod: %s (Node: %s)\n", podName, stats.NodeName)
 			} else {
-				fmt.Fprintf(f, "\n  Pod: %s\n", podName)
+				w.fprintf("\n  Pod: %s\n", podName)
 			}
-			fmt.Fprintf(f, "  ┌─────────────────────────────────────────────────────────────────────────┐\n")
-			fmt.Fprintf(f, "  │ CPU Usage (millicores)                                                  │\n")
-			fmt.Fprintf(f, "  │   Minimum:  %10.2f m                                                 │\n", stats.CPU.Min)
-			fmt.Fprintf(f, "  │   Maximum:  %10.2f m                                                 │\n", stats.CPU.Max)
-			fmt.Fprintf(f, "  │   Average:  %10.2f m                                                 │\n", stats.CPU.Avg)
-			fmt.Fprintf(f, "  │   Samples:  %10d                                                   │\n", stats.CPU.Count)
-			fmt.Fprintf(f, "  ├─────────────────────────────────────────────────────────────────────────┤\n")
-			fmt.Fprintf(f, "  │ Memory Usage (MiB)                                                      │\n")
-			fmt.Fprintf(f, "  │   Minimum:  %10.2f MiB                                              │\n", stats.Memory.Min/1024/1024)
-			fmt.Fprintf(f, "  │   Maximum:  %10.2f MiB                                              │\n", stats.Memory.Max/1024/1024)
-			fmt.Fprintf(f, "  │   Average:  %10.2f MiB                                              │\n", stats.Memory.Avg/1024/1024)
-			fmt.Fprintf(f, "  │   Samples:  %10d                                                   │\n", stats.Memory.Count)
-			fmt.Fprintf(f, "  └─────────────────────────────────────────────────────────────────────────┘\n")
+			w.fprintf("  ┌─────────────────────────────────────────────────────────────────────────┐\n")
+			w.fprintf("  │ CPU Usage (millicores)                                                  │\n")
+			w.fprintf("  │   Minimum:  %10.2f m                                                 │\n", stats.CPU.Min)
+			w.fprintf("  │   Maximum:  %10.2f m                                                 │\n", stats.CPU.Max)
+			w.fprintf("  │   Average:  %10.2f m                                                 │\n", stats.CPU.Avg)
+			w.fprintf("  │   Samples:  %10d                                                   │\n", stats.CPU.Count)
+			w.fprintf("  ├─────────────────────────────────────────────────────────────────────────┤\n")
+			w.fprintf("  │ Memory Usage (MiB)                                                      │\n")
+			w.fprintf("  │   Minimum:  %10.2f MiB                                              │\n", stats.Memory.Min/1024/1024)
+			w.fprintf("  │   Maximum:  %10.2f MiB                                              │\n", stats.Memory.Max/1024/1024)
+			w.fprintf("  │   Average:  %10.2f MiB                                              │\n", stats.Memory.Avg/1024/1024)
+			w.fprintf("  │   Samples:  %10d                                                   │\n", stats.Memory.Count)
+			w.fprintf("  └─────────────────────────────────────────────────────────────────────────┘\n")
 		}
-		fmt.Fprintf(f, "\n")
+		w.fprintf("\n")
 	}
+
+	return w.err
 }
 
 func CalculateSummary(results *metrics.MonitoringResults) map[string]map[string]*PodStats {
@@ -300,7 +339,11 @@ func (g *HTMLGenerator) Generate(filename string, results *metrics.MonitoringRes
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	summary := CalculateSummary(results)
 

@@ -205,7 +205,11 @@ func (g *ChartGenerator) generatePodChart(chartsDir string, data *PodTimeSeries)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	return graph.Render(chart.PNG, f)
 }
