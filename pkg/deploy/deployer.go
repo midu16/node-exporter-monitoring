@@ -14,11 +14,22 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// DaemonSetVariant represents the different node-exporter daemonset variants
+type DaemonSetVariant string
+
+const (
+	VariantFull           DaemonSetVariant = "full"            // All collectors: zoneinfo, interrupts, softirqs
+	VariantRootless       DaemonSetVariant = "rootless"        // Rootless with all collectors
+	VariantZoneinfoOnly   DaemonSetVariant = "zoneinfo-only"   // Only zoneinfo collector
+	VariantInterruptsOnly DaemonSetVariant = "interrupts-only" // Only interrupts collector
+	VariantSoftirqsOnly   DaemonSetVariant = "softirqs-only"   // Only softirqs collector
+)
+
 type Deployer struct {
 	clientset    *kubernetes.Clientset
 	baseDir      string
-	manifestsDir string // Directory containing k8s manifests
-	useRootless  bool   // Use rootless daemonset variant
+	manifestsDir string           // Directory containing k8s manifests
+	variant      DaemonSetVariant // Daemonset variant to deploy
 }
 
 type DeploymentStatus struct {
@@ -64,14 +75,14 @@ func NewDeployer(kubeconfigPath string) *Deployer {
 		clientset:    clientset,
 		baseDir:      baseDir,
 		manifestsDir: manifestsDir,
-		useRootless:  false, // Default to privileged daemonset
+		variant:      VariantFull, // Default to full variant
 	}
 }
 
 // NewDeployerWithOptions creates a new Deployer with custom options
-func NewDeployerWithOptions(kubeconfigPath string, useRootless bool) *Deployer {
+func NewDeployerWithOptions(kubeconfigPath string, variant DaemonSetVariant) *Deployer {
 	deployer := NewDeployer(kubeconfigPath)
-	deployer.useRootless = useRootless
+	deployer.variant = variant
 	return deployer
 }
 
@@ -80,9 +91,14 @@ func (d *Deployer) SetManifestsDir(dir string) {
 	d.manifestsDir = dir
 }
 
-// SetRootless sets whether to use the rootless daemonset variant
-func (d *Deployer) SetRootless(useRootless bool) {
-	d.useRootless = useRootless
+// SetVariant sets the daemonset variant to deploy
+func (d *Deployer) SetVariant(variant DaemonSetVariant) {
+	d.variant = variant
+}
+
+// GetVariant returns the current daemonset variant
+func (d *Deployer) GetVariant() DaemonSetVariant {
+	return d.variant
 }
 
 func (d *Deployer) Deploy(ctx context.Context) error {
@@ -98,11 +114,9 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 		return fmt.Errorf("kustomization.yaml not found in %s", d.manifestsDir)
 	}
 
-	// If rootless mode is requested, we need to modify kustomization.yaml temporarily
-	if d.useRootless {
-		if err := d.ensureRootlessKustomization(); err != nil {
-			return fmt.Errorf("failed to configure rootless deployment: %w", err)
-		}
+	// Validate the variant configuration in kustomization.yaml
+	if err := d.ensureVariantKustomization(); err != nil {
+		return fmt.Errorf("failed to configure variant deployment: %w", err)
 	}
 
 	// Try kubectl first, then oc
@@ -124,10 +138,17 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 	}
 
 	fmt.Printf("✅ Successfully deployed node-exporter-zoneinfo from %s\n", d.manifestsDir)
-	if d.useRootless {
-		fmt.Println("   Using rootless daemonset variant")
-	} else {
-		fmt.Println("   Using privileged daemonset variant")
+	switch d.variant {
+	case VariantFull:
+		fmt.Println("   Using full variant (zoneinfo, interrupts, softirqs)")
+	case VariantRootless:
+		fmt.Println("   Using rootless variant (all collectors)")
+	case VariantZoneinfoOnly:
+		fmt.Println("   Using zoneinfo-only variant")
+	case VariantInterruptsOnly:
+		fmt.Println("   Using interrupts-only variant")
+	case VariantSoftirqsOnly:
+		fmt.Println("   Using softirqs-only variant")
 	}
 
 	// Wait for deployment to stabilize
@@ -205,23 +226,38 @@ func (d *Deployer) commandExists(cmd string) bool {
 	return err == nil
 }
 
-// ensureRootlessKustomization checks if rootless variant is needed
+// ensureVariantKustomization checks if the correct variant is configured
 // This is informational - the kustomization.yaml should be manually edited
 // or we can provide a warning
-func (d *Deployer) ensureRootlessKustomization() error {
+func (d *Deployer) ensureVariantKustomization() error {
 	kustomizationPath := filepath.Join(d.manifestsDir, "kustomization.yaml")
 	content, err := os.ReadFile(kustomizationPath)
 	if err != nil {
 		return fmt.Errorf("failed to read kustomization.yaml: %w", err)
 	}
 
-	// Check if daemonset-rootless.yaml is already uncommented
 	contentStr := string(content)
-	if !strings.Contains(contentStr, "- daemonset-rootless.yaml") ||
-		strings.Contains(contentStr, "#  - daemonset-rootless.yaml") ||
-		strings.Contains(contentStr, "# - daemonset-rootless.yaml") {
-		fmt.Println("⚠️  Warning: Rootless mode requested but kustomization.yaml may not be configured.")
-		fmt.Println("   Please ensure daemonset-rootless.yaml is uncommented and daemonset.yaml is commented.")
+	var expectedFile string
+
+	switch d.variant {
+	case VariantFull:
+		expectedFile = "daemonset.yaml"
+	case VariantRootless:
+		expectedFile = "daemonset-rootless.yaml"
+	case VariantZoneinfoOnly:
+		expectedFile = "daemonset-zoneinfo-only.yaml"
+	case VariantInterruptsOnly:
+		expectedFile = "daemonset-interrupts-only.yaml"
+	case VariantSoftirqsOnly:
+		expectedFile = "daemonset-softirqs-only.yaml"
+	}
+
+	// Check if expected variant file is uncommented
+	if !strings.Contains(contentStr, "- "+expectedFile) ||
+		strings.Contains(contentStr, "#  - "+expectedFile) ||
+		strings.Contains(contentStr, "# - "+expectedFile) {
+		fmt.Printf("⚠️  Warning: Variant '%s' requested but kustomization.yaml may not be configured.\n", d.variant)
+		fmt.Printf("   Please ensure %s is uncommented and other daemonset variants are commented.\n", expectedFile)
 		fmt.Println("   Continuing with current kustomization.yaml configuration...")
 	}
 

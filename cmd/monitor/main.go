@@ -31,12 +31,22 @@ var (
 	skipDeploy     = flag.Bool("skip-deploy", false, "Skip deployment verification")
 	kubeconfig     = flag.String("kubeconfig", "", "Path to kubeconfig file (optional, defaults to $KUBECONFIG or ~/.kube/config)")
 	twoPhase       = flag.Bool("two-phase", false, "Run two-phase monitoring: Phase 1 with node-exporter, Phase 2 without")
+	threePhase     = flag.Bool("three-phase", false, "Run three-phase monitoring: Phase 1 (all collectors), Phase 2 (no node-exporter), Phase 3 (zoneinfo only)")
 	useRootless    = flag.Bool("rootless", false, "Deploy rootless variant of node-exporter daemonset")
+	zoneinfoOnly   = flag.Bool("zoneinfo-only", false, "Deploy with only zoneinfo collector enabled")
+	interruptsOnly = flag.Bool("interrupts-only", false, "Deploy with only interrupts collector enabled")
+	softirqsOnly   = flag.Bool("softirqs-only", false, "Deploy with only softirqs collector enabled")
 	manifestsDir   = flag.String("manifests-dir", "", "Custom path to manifests directory (default: ./node-exporter-zoneinfo/)")
 )
 
 func main() {
 	flag.Parse()
+
+	// Validate flags first (before any setup)
+	if *twoPhase && *threePhase {
+		fmt.Println("Error: Cannot specify both --two-phase and --three-phase flags")
+		os.Exit(1)
+	}
 
 	// Create reports directory first (before setting up context)
 	if err := os.MkdirAll(reportDir, 0o755); err != nil {
@@ -60,15 +70,58 @@ func main() {
 	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
-	if *twoPhase {
+	switch {
+	case *threePhase:
+		runThreePhaseMonitoring(ctx)
+	case *twoPhase:
 		runTwoPhaseMonitoring(ctx)
-	} else {
+	default:
 		runSinglePhaseMonitoring(ctx)
 	}
 }
 
 func createDeployer() *deploy.Deployer {
-	deployer := deploy.NewDeployerWithOptions(*kubeconfig, *useRootless)
+	variant := determineVariant()
+	deployer := deploy.NewDeployerWithOptions(*kubeconfig, variant)
+	if *manifestsDir != "" {
+		deployer.SetManifestsDir(*manifestsDir)
+	}
+	return deployer
+}
+
+func determineVariant() deploy.DaemonSetVariant {
+	// Check for variant flags (mutually exclusive)
+	variantCount := 0
+	selectedVariant := deploy.VariantFull
+
+	if *useRootless {
+		variantCount++
+		selectedVariant = deploy.VariantRootless
+	}
+	if *zoneinfoOnly {
+		variantCount++
+		selectedVariant = deploy.VariantZoneinfoOnly
+	}
+	if *interruptsOnly {
+		variantCount++
+		selectedVariant = deploy.VariantInterruptsOnly
+	}
+	if *softirqsOnly {
+		variantCount++
+		selectedVariant = deploy.VariantSoftirqsOnly
+	}
+
+	if variantCount > 1 {
+		fmt.Println("Error: Only one variant flag can be specified at a time")
+		fmt.Println("  Flags: --rootless, --zoneinfo-only, --interrupts-only, --softirqs-only")
+		os.Exit(1)
+	}
+
+	return selectedVariant
+}
+
+func createDeployerWithVariant(variant deploy.DaemonSetVariant) *deploy.Deployer {
+	deployer := deploy.NewDeployerWithOptions(*kubeconfig, variant)
 	if *manifestsDir != "" {
 		deployer.SetManifestsDir(*manifestsDir)
 	}
@@ -268,6 +321,219 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 	fmt.Println("📁 Output Files:")
 	fmt.Printf("   Report: reports/two-phase-monitoring-report-%s.txt\n", timestamp)
 	fmt.Printf("   Charts: reports/charts/ (showing full 60-minute timeline)\n")
+	fmt.Println()
+}
+
+func deployAndVerify(ctx context.Context, deployer *deploy.Deployer, description string) error {
+	fmt.Printf("📦 Deploying node-exporter-zoneinfo (%s)...\n", description)
+	if err := deployer.Deploy(ctx); err != nil {
+		return fmt.Errorf("deployment failed: %w", err)
+	}
+	fmt.Println("✅ Deployment completed successfully")
+	fmt.Println()
+
+	fmt.Println("⏳ Waiting for pods to be ready...")
+	time.Sleep(15 * time.Second)
+
+	fmt.Println("🔍 Verifying deployment status...")
+	status, err := deployer.GetDeploymentStatus(ctx)
+	if err != nil {
+		log.Printf("Warning: Could not verify deployment: %v", err)
+	} else {
+		fmt.Printf("   Node Exporter Zoneinfo: %d/%d pods ready\n",
+			status.NodeExporterReady, status.NodeExporterTotal)
+		fmt.Printf("   Prometheus: %d/%d pods ready\n",
+			status.PrometheusReady, status.PrometheusTotal)
+		fmt.Println()
+	}
+	return nil
+}
+
+func cleanupResources(ctx context.Context, deployer *deploy.Deployer) {
+	fmt.Println("🧹 Cleaning up existing resources...")
+	if err := deployer.Undeploy(ctx); err != nil {
+		log.Printf("Warning: Cleanup failed (may not exist): %v", err)
+	}
+	time.Sleep(5 * time.Second)
+}
+
+func runMonitoringPhase(ctx context.Context, collector *metrics.Collector, targets []metrics.PodTarget, phaseName string) (*metrics.MonitoringResults, time.Duration, error) {
+	fmt.Printf("📊 Starting %s monitoring for %v (interval: %v)\n", phaseName, *duration, *sampleInterval)
+	fmt.Println()
+
+	phaseStart := time.Now()
+	results, err := collector.Collect(ctx, targets, *duration)
+	if err != nil && err != context.Canceled {
+		return nil, 0, fmt.Errorf("%s monitoring failed: %w", phaseName, err)
+	}
+	phaseDuration := time.Since(phaseStart)
+
+	fmt.Println()
+	fmt.Printf("✅ %s monitoring completed!\n", phaseName)
+	fmt.Printf("   Duration: %v, Samples: %d\n", phaseDuration.Round(time.Second), len(results.Samples))
+	fmt.Println()
+
+	return results, phaseDuration, nil
+}
+
+func runThreePhaseMonitoring(ctx context.Context) {
+	deployer := createDeployerWithVariant(deploy.VariantFull)
+
+	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║            THREE-PHASE MONITORING MODE                        ║")
+	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+
+	// ==================== PHASE 1 ====================
+	fmt.Println("┌───────────────────────────────────────────────────────────────┐")
+	fmt.Println("│  PHASE 1: All Collectors (30 minutes)                        │")
+	fmt.Println("│  node-exporter with: zoneinfo, interrupts, softirqs          │")
+	fmt.Println("└───────────────────────────────────────────────────────────────┘")
+	fmt.Println()
+
+	cleanupResources(ctx, deployer)
+	if err := deployAndVerify(ctx, deployer, "all collectors"); err != nil {
+		log.Fatalf("Phase 1 deployment failed: %v", err)
+	}
+
+	// Define monitoring targets
+	allTargets := []metrics.PodTarget{
+		{Namespace: "node-exporter-zoneinfo", LabelSelector: "app.kubernetes.io/name=node-exporter-zoneinfo"},
+		{Namespace: "openshift-monitoring", LabelSelector: "app.kubernetes.io/name=prometheus-operator"},
+		{Namespace: "openshift-monitoring", LabelSelector: "app.kubernetes.io/name=prometheus-operator-admission-webhook"},
+	}
+
+	// Initialize combined results
+	combinedResults := &metrics.MonitoringResults{
+		StartTime: time.Now(),
+		Samples:   make([]metrics.ResourceSample, 0),
+		Errors:    make([]string, 0),
+	}
+
+	collector := metrics.NewCollector(*sampleInterval, *kubeconfig)
+
+	// ==================== PHASE 1: Monitoring ====================
+	phase1Results, phase1Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 1")
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	combinedResults.Samples = append(combinedResults.Samples, phase1Results.Samples...)
+	combinedResults.Errors = append(combinedResults.Errors, phase1Results.Errors...)
+
+	// ==================== PHASE 2 ====================
+	fmt.Println()
+	fmt.Println("┌───────────────────────────────────────────────────────────────┐")
+	fmt.Println("│  PHASE 2: No Node-Exporter (30 minutes)                      │")
+	fmt.Println("│  Prometheus Operator only                                    │")
+	fmt.Println("└───────────────────────────────────────────────────────────────┘")
+	fmt.Println()
+
+	fmt.Println("🗑️  Removing all node-exporter-zoneinfo resources...")
+	if err := deployer.Undeploy(ctx); err != nil {
+		log.Fatalf("Failed to undeploy: %v", err)
+	}
+	fmt.Println("✅ Resources removed successfully")
+	time.Sleep(10 * time.Second)
+	fmt.Println()
+
+	phase2Results, phase2Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 2")
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	combinedResults.Samples = append(combinedResults.Samples, phase2Results.Samples...)
+	combinedResults.Errors = append(combinedResults.Errors, phase2Results.Errors...)
+
+	// ==================== PHASE 3 ====================
+	fmt.Println()
+	fmt.Println("┌───────────────────────────────────────────────────────────────┐")
+	fmt.Println("│  PHASE 3: Zoneinfo Only (30 minutes)                         │")
+	fmt.Println("│  node-exporter with: --collector.zoneinfo ONLY               │")
+	fmt.Println("└───────────────────────────────────────────────────────────────┘")
+	fmt.Println()
+
+	zoneinfoDeployer := createDeployerWithVariant(deploy.VariantZoneinfoOnly)
+	if err := deployAndVerify(ctx, zoneinfoDeployer, "zoneinfo collector only"); err != nil {
+		log.Fatalf("Phase 3 deployment failed: %v", err)
+	}
+
+	phase3Results, phase3Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 3")
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	combinedResults.Samples = append(combinedResults.Samples, phase3Results.Samples...)
+	combinedResults.Errors = append(combinedResults.Errors, phase3Results.Errors...)
+
+	// ==================== GENERATE COMBINED REPORT ====================
+	combinedResults.EndTime = time.Now()
+	combinedResults.Duration = combinedResults.EndTime.Sub(combinedResults.StartTime)
+	combinedResults.SampleCount = len(combinedResults.Samples)
+
+	fmt.Println()
+	fmt.Println("📝 Generating combined three-phase report (90 minutes)...")
+
+	timestamp := time.Now().Format("20060102-150405")
+
+	switch *outputFormat {
+	case "json":
+		filename := fmt.Sprintf("%s/three-phase-monitoring-report-%s.json", reportDir, timestamp)
+		if err := saveJSONReport(filename, combinedResults); err != nil {
+			log.Fatalf("Failed to save JSON report: %v", err)
+		}
+		fmt.Printf("   JSON report saved to: %s\n", filename)
+
+	case "html":
+		filename := fmt.Sprintf("%s/three-phase-monitoring-report-%s.html", reportDir, timestamp)
+		generator := report.NewHTMLGenerator()
+		if err := generator.Generate(filename, combinedResults); err != nil {
+			log.Fatalf("Failed to generate HTML report: %v", err)
+		}
+		fmt.Printf("   HTML report saved to: %s\n", filename)
+
+	default: // "text" or any other format
+		filename := fmt.Sprintf("%s/three-phase-monitoring-report-%s.txt", reportDir, timestamp)
+		generator := report.NewTextGenerator()
+		if err := generator.Generate(filename, combinedResults); err != nil {
+			log.Fatalf("Failed to generate text report: %v", err)
+		}
+		fmt.Printf("   Text report saved to: %s\n", filename)
+	}
+
+	// Generate charts
+	fmt.Println()
+	fmt.Println("📈 Generating combined metric charts (90 minutes)...")
+	chartGen := charts.NewChartGenerator(reportDir)
+	if err := chartGen.GenerateCharts(combinedResults); err != nil {
+		log.Printf("Warning: Failed to generate charts: %v", err)
+	} else {
+		fmt.Printf("   Charts saved to: %s/charts/\n", reportDir)
+	}
+
+	// Print summary
+	fmt.Println()
+	printSummary(combinedResults)
+
+	// Final summary
+	fmt.Println()
+	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║        THREE-PHASE MONITORING COMPLETE                        ║")
+	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+	fmt.Println("📋 Results Summary:")
+	fmt.Printf("   Total monitoring duration: %v\n", combinedResults.Duration.Round(time.Second))
+	fmt.Printf("   Phase 1 duration: %v (all collectors)\n", phase1Duration.Round(time.Second))
+	fmt.Printf("   Phase 2 duration: %v (no node-exporter)\n", phase2Duration.Round(time.Second))
+	fmt.Printf("   Phase 3 duration: %v (zoneinfo only)\n", phase3Duration.Round(time.Second))
+	fmt.Printf("   Total samples collected: %d\n", len(combinedResults.Samples))
+	fmt.Printf("   Phase 1 samples: %d\n", len(phase1Results.Samples))
+	fmt.Printf("   Phase 2 samples: %d\n", len(phase2Results.Samples))
+	fmt.Printf("   Phase 3 samples: %d\n", len(phase3Results.Samples))
+	fmt.Println()
+	fmt.Println("📁 Output Files:")
+	fmt.Printf("   Report: reports/three-phase-monitoring-report-%s.txt\n", timestamp)
+	fmt.Printf("   Charts: reports/charts/ (showing full 90-minute timeline)\n")
 	fmt.Println()
 }
 

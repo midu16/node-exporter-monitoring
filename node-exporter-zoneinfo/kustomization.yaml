@@ -8,9 +8,16 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - clusterrolebinding-privileged-scc.yaml
-  # Comment the daemonset.yaml and uncomment the daemonset-rootless.yaml to deploy the rootless node_exporter.
-  #or the otherway around if you want to deploy the privileged node_exporter.
+  # Choose ONE daemonset variant:
+  # - daemonset.yaml (default): all collectors enabled (zoneinfo, interrupts, softirqs)
+  # - daemonset-rootless.yaml: rootless variant with all collectors
+  # - daemonset-zoneinfo-only.yaml: only zoneinfo collector
+  # - daemonset-interrupts-only.yaml: only interrupts collector
+  # - daemonset-softirqs-only.yaml: only softirqs collector
   - daemonset.yaml
   # - daemonset-rootless.yaml
+  # - daemonset-zoneinfo-only.yaml
+  # - daemonset-interrupts-only.yaml
+  # - daemonset-softirqs-only.yaml
   - service.yaml
   - servicemonitor.yaml
