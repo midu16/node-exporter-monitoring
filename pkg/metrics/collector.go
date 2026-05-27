@@ -122,9 +122,9 @@ func (c *Collector) Collect(ctx context.Context, targets []PodTarget, duration t
 	}
 }
 
-func (c *Collector) collectSample(ctx context.Context, targets []PodTarget, timestamp time.Time) ([]ResourceSample, []string) {
-	samples := make([]ResourceSample, 0)
-	errors := make([]string, 0)
+func (c *Collector) collectSample(ctx context.Context, targets []PodTarget, timestamp time.Time) (samples []ResourceSample, errors []string) {
+	samples = make([]ResourceSample, 0)
+	errors = make([]string, 0)
 
 	for _, target := range targets {
 		var pods []string
@@ -142,8 +142,8 @@ func (c *Collector) collectSample(ctx context.Context, targets []PodTarget, time
 					target.Namespace, target.LabelSelector, err))
 				continue
 			}
-			for _, pod := range podList.Items {
-				pods = append(pods, pod.Name)
+			for i := range podList.Items {
+				pods = append(pods, podList.Items[i].Name)
 			}
 		}
 
@@ -200,7 +200,7 @@ func (c *Collector) GetPodStatus(ctx context.Context, namespace, podName string)
 }
 
 // Helper to get all pods in a namespace
-func (c *Collector) ListPods(ctx context.Context, namespace string, labelSelector string) (*corev1.PodList, error) {
+func (c *Collector) ListPods(ctx context.Context, namespace, labelSelector string) (*corev1.PodList, error) {
 	return c.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})

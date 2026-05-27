@@ -34,7 +34,7 @@ func NewChartGenerator(outputDir string) *ChartGenerator {
 func (g *ChartGenerator) GenerateCharts(results *metrics.MonitoringResults) error {
 	// Create charts directory
 	chartsDir := filepath.Join(g.outputDir, "charts")
-	if err := os.MkdirAll(chartsDir, 0755); err != nil {
+	if err := os.MkdirAll(chartsDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create charts directory: %w", err)
 	}
 

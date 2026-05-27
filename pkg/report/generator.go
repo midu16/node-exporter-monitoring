@@ -61,15 +61,38 @@ func (g *TextGenerator) Generate(filename string, results *metrics.MonitoringRes
 
 	w := &writeHelper{w: f}
 
-	// Use the TwoPhaseMode flag set during initialization
-	isTwoPhase := g.TwoPhaseMode
+	g.writeHeader(w, results)
+	if w.err != nil {
+		return w.err
+	}
 
-	// Write header
+	summary := CalculateSummary(results)
+	g.writeDeploymentSummary(w, summary)
+	if w.err != nil {
+		return w.err
+	}
+
+	if g.TwoPhaseMode {
+		if err := g.generateTwoPhaseReport(w, results); err != nil {
+			return err
+		}
+	} else {
+		if err := g.generateResourceSection(w, summary, "📊 Resource Consumption Details"); err != nil {
+			return err
+		}
+	}
+
+	g.writeErrorsSection(w, results.Errors)
+	g.writeFooter(w)
+
+	return w.err
+}
+
+func (g *TextGenerator) writeHeader(w *writeHelper, results *metrics.MonitoringResults) {
 	w.fprintf("╔═══════════════════════════════════════════════════════════════════════════════╗\n")
 	w.fprintf("║         Node Exporter Zoneinfo - Resource Monitoring Report                  ║\n")
 	w.fprintf("╚═══════════════════════════════════════════════════════════════════════════════╝\n\n")
 
-	// Monitoring period
 	w.fprintf("📅 Monitoring Period\n")
 	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 	w.fprintf("  Start Time:    %s\n", results.StartTime.Format("2006-01-02 15:04:05 MST"))
@@ -77,19 +100,13 @@ func (g *TextGenerator) Generate(filename string, results *metrics.MonitoringRes
 	w.fprintf("  Duration:      %v\n", results.Duration.Round(time.Second))
 	w.fprintf("  Samples:       %d\n", results.SampleCount)
 	w.fprintf("  Data Points:   %d\n", len(results.Samples))
-	if isTwoPhase {
+	if g.TwoPhaseMode {
 		w.fprintf("  Mode:          Two-Phase (Phase 1 + Phase 2)\n")
 	}
 	w.fprintf("\n")
+}
 
-	if w.err != nil {
-		return w.err
-	}
-
-	// Calculate summary for deployment section
-	summary := CalculateSummary(results)
-
-	// Deployment summary
+func (g *TextGenerator) writeDeploymentSummary(w *writeHelper, summary map[string]map[string]*PodStats) {
 	w.fprintf("📦 Deployment Summary\n")
 	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
@@ -100,57 +117,43 @@ func (g *TextGenerator) Generate(filename string, results *metrics.MonitoringRes
 
 	w.fprintf("  Namespace: node-exporter-zoneinfo\n")
 	w.fprintf("    Pods Monitored: %d", totalPods["node-exporter-zoneinfo"])
-	if isTwoPhase {
+	if g.TwoPhaseMode {
 		w.fprintf(" (Phase 1 only - deleted in Phase 2)")
 	}
 	w.fprintf("\n\n")
 
 	w.fprintf("  Namespace: openshift-monitoring\n")
 	w.fprintf("    Pods Monitored: %d", totalPods["openshift-monitoring"])
-	if isTwoPhase {
+	if g.TwoPhaseMode {
 		w.fprintf(" (Both phases)")
 	}
 	w.fprintf("\n")
 	w.fprintf("    - Prometheus: 2 (prometheus-k8s-0, prometheus-k8s-1)\n")
 	w.fprintf("    - Prometheus Operator: monitored via labels\n")
 	w.fprintf("    - Thanos Querier: monitored via labels\n\n")
+}
 
-	if w.err != nil {
-		return w.err
+func (g *TextGenerator) writeErrorsSection(w *writeHelper, errors []string) {
+	if len(errors) == 0 {
+		return
 	}
 
-	if isTwoPhase {
-		// Generate two-phase report with separate sections
-		if err := g.generateTwoPhaseReport(w, results); err != nil {
-			return err
-		}
-	} else {
-		// Generate standard single-phase report
-		if err := g.generateResourceSection(w, summary, "📊 Resource Consumption Details"); err != nil {
-			return err
-		}
+	w.fprintf("\n⚠️  Errors Encountered\n")
+	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	uniqueErrors := make(map[string]int)
+	for _, err := range errors {
+		uniqueErrors[err]++
 	}
-
-	// Errors section
-	if len(results.Errors) > 0 {
-		w.fprintf("\n⚠️  Errors Encountered\n")
-		w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-		uniqueErrors := make(map[string]int)
-		for _, err := range results.Errors {
-			uniqueErrors[err]++
-		}
-		for err, count := range uniqueErrors {
-			w.fprintf("  [%d occurrences] %s\n", count, err)
-		}
-		w.fprintf("\n")
+	for err, count := range uniqueErrors {
+		w.fprintf("  [%d occurrences] %s\n", count, err)
 	}
+	w.fprintf("\n")
+}
 
-	// Footer
+func (g *TextGenerator) writeFooter(w *writeHelper) {
 	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 	w.fprintf("Report generated: %s\n", time.Now().Format("2006-01-02 15:04:05 MST"))
 	w.fprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-
-	return w.err
 }
 
 func (g *TextGenerator) generateTwoPhaseReport(w *writeHelper, results *metrics.MonitoringResults) error {

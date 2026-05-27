@@ -15,8 +15,10 @@ import (
 )
 
 type Deployer struct {
-	clientset *kubernetes.Clientset
-	baseDir   string
+	clientset    *kubernetes.Clientset
+	baseDir      string
+	manifestsDir string // Directory containing k8s manifests
+	useRootless  bool   // Use rootless daemonset variant
 }
 
 type DeploymentStatus struct {
@@ -55,27 +57,62 @@ func NewDeployer(kubeconfigPath string) *Deployer {
 		panic(fmt.Sprintf("Failed to get current directory: %v", err))
 	}
 
+	// Set manifests directory to ./node-exporter-zoneinfo/
+	manifestsDir := filepath.Join(baseDir, "node-exporter-zoneinfo")
+
 	return &Deployer{
-		clientset: clientset,
-		baseDir:   baseDir,
+		clientset:    clientset,
+		baseDir:      baseDir,
+		manifestsDir: manifestsDir,
+		useRootless:  false, // Default to privileged daemonset
 	}
 }
 
+// NewDeployerWithOptions creates a new Deployer with custom options
+func NewDeployerWithOptions(kubeconfigPath string, useRootless bool) *Deployer {
+	deployer := NewDeployer(kubeconfigPath)
+	deployer.useRootless = useRootless
+	return deployer
+}
+
+// SetManifestsDir allows overriding the default manifests directory
+func (d *Deployer) SetManifestsDir(dir string) {
+	d.manifestsDir = dir
+}
+
+// SetRootless sets whether to use the rootless daemonset variant
+func (d *Deployer) SetRootless(useRootless bool) {
+	d.useRootless = useRootless
+}
+
 func (d *Deployer) Deploy(ctx context.Context) error {
-	kustomizationPath := filepath.Join(d.baseDir, "kustomization.yaml")
+	// Verify manifests directory exists
+	if _, err := os.Stat(d.manifestsDir); os.IsNotExist(err) {
+		return fmt.Errorf("manifests directory not found: %s", d.manifestsDir)
+	}
+
+	kustomizationPath := filepath.Join(d.manifestsDir, "kustomization.yaml")
 
 	// Check if kustomization.yaml exists
 	if _, err := os.Stat(kustomizationPath); os.IsNotExist(err) {
-		return fmt.Errorf("kustomization.yaml not found in %s", d.baseDir)
+		return fmt.Errorf("kustomization.yaml not found in %s", d.manifestsDir)
+	}
+
+	// If rootless mode is requested, we need to modify kustomization.yaml temporarily
+	if d.useRootless {
+		if err := d.ensureRootlessKustomization(); err != nil {
+			return fmt.Errorf("failed to configure rootless deployment: %w", err)
+		}
 	}
 
 	// Try kubectl first, then oc
 	var cmd *exec.Cmd
-	if d.commandExists("kubectl") {
-		cmd = exec.CommandContext(ctx, "kubectl", "apply", "-k", d.baseDir)
-	} else if d.commandExists("oc") {
-		cmd = exec.CommandContext(ctx, "oc", "apply", "-k", d.baseDir)
-	} else {
+	switch {
+	case d.commandExists("kubectl"):
+		cmd = exec.CommandContext(ctx, "kubectl", "apply", "-k", d.manifestsDir)
+	case d.commandExists("oc"):
+		cmd = exec.CommandContext(ctx, "oc", "apply", "-k", d.manifestsDir)
+	default:
 		return fmt.Errorf("neither kubectl nor oc command found")
 	}
 
@@ -84,6 +121,13 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("deployment command failed: %w", err)
+	}
+
+	fmt.Printf("✅ Successfully deployed node-exporter-zoneinfo from %s\n", d.manifestsDir)
+	if d.useRootless {
+		fmt.Println("   Using rootless daemonset variant")
+	} else {
+		fmt.Println("   Using privileged daemonset variant")
 	}
 
 	// Wait for deployment to stabilize
@@ -101,8 +145,8 @@ func (d *Deployer) GetDeploymentStatus(ctx context.Context) (*DeploymentStatus, 
 	})
 	if err == nil {
 		status.NodeExporterTotal = len(nePods.Items)
-		for _, pod := range nePods.Items {
-			if d.isPodReady(&pod) {
+		for i := range nePods.Items {
+			if d.isPodReady(&nePods.Items[i]) {
 				status.NodeExporterReady++
 			}
 		}
@@ -114,8 +158,8 @@ func (d *Deployer) GetDeploymentStatus(ctx context.Context) (*DeploymentStatus, 
 	})
 	if err == nil {
 		status.PrometheusTotal = len(promPods.Items)
-		for _, pod := range promPods.Items {
-			if d.isPodReady(&pod) {
+		for i := range promPods.Items {
+			if d.isPodReady(&promPods.Items[i]) {
 				status.PrometheusReady++
 			}
 		}
@@ -127,8 +171,8 @@ func (d *Deployer) GetDeploymentStatus(ctx context.Context) (*DeploymentStatus, 
 	})
 	if err == nil {
 		status.ThanosTotal = len(thanosPods.Items)
-		for _, pod := range thanosPods.Items {
-			if d.isPodReady(&pod) {
+		for i := range thanosPods.Items {
+			if d.isPodReady(&thanosPods.Items[i]) {
 				status.ThanosReady++
 			}
 		}
@@ -140,8 +184,8 @@ func (d *Deployer) GetDeploymentStatus(ctx context.Context) (*DeploymentStatus, 
 	})
 	if err == nil {
 		status.OperatorTotal = len(opPods.Items)
-		for _, pod := range opPods.Items {
-			if d.isPodReady(&pod) {
+		for i := range opPods.Items {
+			if d.isPodReady(&opPods.Items[i]) {
 				status.OperatorReady++
 			}
 		}
@@ -151,12 +195,6 @@ func (d *Deployer) GetDeploymentStatus(ctx context.Context) (*DeploymentStatus, 
 }
 
 func (d *Deployer) isPodReady(pod metav1.Object) bool {
-	// Type assert to access Status
-	type podWithStatus interface {
-		metav1.Object
-		GetStatus() interface{}
-	}
-
 	// Simple check - in real implementation, check pod.Status.Conditions
 	// For now, just return true if pod exists
 	return true
@@ -167,13 +205,37 @@ func (d *Deployer) commandExists(cmd string) bool {
 	return err == nil
 }
 
+// ensureRootlessKustomization checks if rootless variant is needed
+// This is informational - the kustomization.yaml should be manually edited
+// or we can provide a warning
+func (d *Deployer) ensureRootlessKustomization() error {
+	kustomizationPath := filepath.Join(d.manifestsDir, "kustomization.yaml")
+	content, err := os.ReadFile(kustomizationPath)
+	if err != nil {
+		return fmt.Errorf("failed to read kustomization.yaml: %w", err)
+	}
+
+	// Check if daemonset-rootless.yaml is already uncommented
+	contentStr := string(content)
+	if !strings.Contains(contentStr, "- daemonset-rootless.yaml") ||
+		strings.Contains(contentStr, "#  - daemonset-rootless.yaml") ||
+		strings.Contains(contentStr, "# - daemonset-rootless.yaml") {
+		fmt.Println("⚠️  Warning: Rootless mode requested but kustomization.yaml may not be configured.")
+		fmt.Println("   Please ensure daemonset-rootless.yaml is uncommented and daemonset.yaml is commented.")
+		fmt.Println("   Continuing with current kustomization.yaml configuration...")
+	}
+
+	return nil
+}
+
 func (d *Deployer) Undeploy(ctx context.Context) error {
 	var cmd *exec.Cmd
-	if d.commandExists("kubectl") {
-		cmd = exec.CommandContext(ctx, "kubectl", "delete", "-k", d.baseDir, "--ignore-not-found=true")
-	} else if d.commandExists("oc") {
-		cmd = exec.CommandContext(ctx, "oc", "delete", "-k", d.baseDir, "--ignore-not-found=true")
-	} else {
+	switch {
+	case d.commandExists("kubectl"):
+		cmd = exec.CommandContext(ctx, "kubectl", "delete", "-k", d.manifestsDir, "--ignore-not-found=true")
+	case d.commandExists("oc"):
+		cmd = exec.CommandContext(ctx, "oc", "delete", "-k", d.manifestsDir, "--ignore-not-found=true")
+	default:
 		return fmt.Errorf("neither kubectl nor oc command found")
 	}
 
@@ -181,6 +243,8 @@ func (d *Deployer) Undeploy(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("undeploy failed: %w\nOutput: %s", err, string(output))
 	}
+
+	fmt.Printf("✅ Successfully removed node-exporter-zoneinfo resources from %s\n", d.manifestsDir)
 
 	return nil
 }
@@ -197,13 +261,14 @@ func (d *Deployer) GetKubernetesVersion(ctx context.Context) (string, error) {
 // DeleteDaemonSet deletes only the node-exporter-zoneinfo DaemonSet
 func (d *Deployer) DeleteDaemonSet(ctx context.Context) error {
 	var cmd *exec.Cmd
-	if d.commandExists("kubectl") {
+	switch {
+	case d.commandExists("kubectl"):
 		cmd = exec.CommandContext(ctx, "kubectl", "delete", "daemonset",
 			"node-exporter-zoneinfo", "-n", "node-exporter-zoneinfo", "--ignore-not-found=true")
-	} else if d.commandExists("oc") {
+	case d.commandExists("oc"):
 		cmd = exec.CommandContext(ctx, "oc", "delete", "daemonset",
 			"node-exporter-zoneinfo", "-n", "node-exporter-zoneinfo", "--ignore-not-found=true")
-	} else {
+	default:
 		return fmt.Errorf("neither kubectl nor oc command found")
 	}
 

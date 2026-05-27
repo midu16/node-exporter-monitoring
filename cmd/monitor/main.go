@@ -31,10 +31,17 @@ var (
 	skipDeploy     = flag.Bool("skip-deploy", false, "Skip deployment verification")
 	kubeconfig     = flag.String("kubeconfig", "", "Path to kubeconfig file (optional, defaults to $KUBECONFIG or ~/.kube/config)")
 	twoPhase       = flag.Bool("two-phase", false, "Run two-phase monitoring: Phase 1 with node-exporter, Phase 2 without")
+	useRootless    = flag.Bool("rootless", false, "Deploy rootless variant of node-exporter daemonset")
+	manifestsDir   = flag.String("manifests-dir", "", "Custom path to manifests directory (default: ./node-exporter-zoneinfo/)")
 )
 
 func main() {
 	flag.Parse()
+
+	// Create reports directory first (before setting up context)
+	if err := os.MkdirAll(reportDir, 0o755); err != nil {
+		log.Fatalf("Failed to create reports directory: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -48,11 +55,6 @@ func main() {
 		cancel()
 	}()
 
-	// Create reports directory
-	if err := os.MkdirAll(reportDir, 0755); err != nil {
-		log.Fatalf("Failed to create reports directory: %v", err)
-	}
-
 	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
 	fmt.Println("║   Node Exporter Zoneinfo - Resource Monitoring Tool          ║")
 	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
@@ -65,8 +67,16 @@ func main() {
 	}
 }
 
+func createDeployer() *deploy.Deployer {
+	deployer := deploy.NewDeployerWithOptions(*kubeconfig, *useRootless)
+	if *manifestsDir != "" {
+		deployer.SetManifestsDir(*manifestsDir)
+	}
+	return deployer
+}
+
 func runTwoPhaseMonitoring(ctx context.Context) {
-	deployer := deploy.NewDeployer(*kubeconfig)
+	deployer := createDeployer()
 
 	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
 	fmt.Println("║              TWO-PHASE MONITORING MODE                        ║")
@@ -218,7 +228,7 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 		}
 		fmt.Printf("   HTML report saved to: %s\n", filename)
 
-	default:
+	default: // "text" or any other format
 		filename := fmt.Sprintf("%s/two-phase-monitoring-report-%s.txt", reportDir, timestamp)
 		generator := report.NewTextGeneratorWithMode(true) // Two-phase mode enabled
 		if err := generator.Generate(filename, combinedResults); err != nil {
@@ -265,7 +275,7 @@ func runSinglePhaseMonitoring(ctx context.Context) {
 	// Deploy if requested
 	if *doDeploy {
 		fmt.Println("📦 Deploying node-exporter-zoneinfo...")
-		deployer := deploy.NewDeployer(*kubeconfig)
+		deployer := createDeployer()
 		if err := deployer.Deploy(ctx); err != nil {
 			log.Fatalf("Deployment failed: %v", err)
 		}
@@ -280,7 +290,7 @@ func runSinglePhaseMonitoring(ctx context.Context) {
 	// Verify deployment status
 	if !*skipDeploy {
 		fmt.Println("🔍 Verifying deployment status...")
-		deployer := deploy.NewDeployer(*kubeconfig)
+		deployer := createDeployer()
 		status, err := deployer.GetDeploymentStatus(ctx)
 		if err != nil {
 			log.Printf("Warning: Could not verify deployment: %v", err)
@@ -360,7 +370,7 @@ func runMonitoring(ctx context.Context, targets []metrics.PodTarget, duration ti
 		}
 		fmt.Printf("   HTML report saved to: %s\n", filename)
 
-	default:
+	default: // "text" or any other format
 		filename := fmt.Sprintf("%s/%smonitoring-report-%s.txt", reportDir, prefix, timestamp)
 		generator := report.NewTextGenerator()
 		if err := generator.Generate(filename, results); err != nil {
