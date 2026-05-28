@@ -8,8 +8,10 @@ bin/
 *.test
 *.out
 .claude/settings.local.json
-.claude/*.md
 .claude/!README.md
+.claude/!AGENTS.md
+!.claude/skills/phase-testing/
+!.claude/commands/phase-testing.md
 *.txt
 
 # Go workspace file
@@ -43,7 +45,6 @@ reports/
 !kustomization.yaml
 
 # Markdown files (except README.md)
-*.md
 !README.md
 
 # Kubeconfig files (sensitive)
