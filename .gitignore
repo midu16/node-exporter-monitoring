@@ -7,7 +7,9 @@
 bin/
 *.test
 *.out
-.claude/
+.claude/settings.local.json
+.claude/*.md
+.claude/!README.md
 *.txt
 
 # Go workspace file
