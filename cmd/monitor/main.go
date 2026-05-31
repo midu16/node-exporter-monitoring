@@ -175,7 +175,8 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 	// Step 2: Deploy fresh resources
 	fmt.Println("📦 Deploying node-exporter-zoneinfo...")
 	if err := deployer.Deploy(ctx); err != nil {
-		log.Fatalf("Deployment failed: %v", err)
+		log.Printf("Error: Deployment failed: %v", err)
+		return
 	}
 	fmt.Println("✅ Deployment completed successfully")
 	fmt.Println()
@@ -223,7 +224,8 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 	rawMetricsFile := fmt.Sprintf("%s/two-phase-raw-metrics-%s.json", reportDir, timestamp)
 	jsonFile, err := os.Create(rawMetricsFile)
 	if err != nil {
-		log.Fatalf("Failed to create raw metrics JSON file: %v", err)
+		log.Printf("Error: Failed to create raw metrics JSON file: %v", err)
+		return
 	}
 	defer func() {
 		if closeErr := jsonFile.Close(); closeErr != nil {
@@ -476,7 +478,8 @@ func runThreePhaseMonitoring(ctx context.Context) {
 	rawMetricsFile := fmt.Sprintf("%s/three-phase-raw-metrics-%s.json", reportDir, timestamp)
 	jsonFile, err := os.Create(rawMetricsFile)
 	if err != nil {
-		log.Fatalf("Failed to create raw metrics JSON file: %v", err)
+		log.Printf("Error: Failed to create raw metrics JSON file: %v", err)
+		return
 	}
 	defer func() {
 		if closeErr := jsonFile.Close(); closeErr != nil {
@@ -662,7 +665,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 	rawMetricsFile := fmt.Sprintf("%s/six-phase-raw-metrics-%s.json", reportDir, timestamp)
 	jsonFile, err := os.Create(rawMetricsFile)
 	if err != nil {
-		log.Fatalf("Failed to create raw metrics JSON file: %v", err)
+		log.Printf("Error: Failed to create raw metrics JSON file: %v", err)
+		return
 	}
 	defer func() {
 		if closeErr := jsonFile.Close(); closeErr != nil {
