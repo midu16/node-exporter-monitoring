@@ -317,7 +317,8 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 	case "json":
 		filename := fmt.Sprintf("%s/two-phase-monitoring-report-%s.json", reportDir, timestamp)
 		if err := saveJSONReport(filename, combinedResults); err != nil {
-			log.Fatalf("Failed to save JSON report: %v", err)
+			log.Printf("Error: Failed to save JSON report: %v", err)
+			return
 		}
 		fmt.Printf("   ✅ JSON report saved to: %s\n", filename)
 
@@ -325,7 +326,8 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 		filename := fmt.Sprintf("%s/two-phase-monitoring-report-%s.html", reportDir, timestamp)
 		generator := report.NewHTMLGenerator()
 		if err := generator.Generate(filename, combinedResults); err != nil {
-			log.Fatalf("Failed to generate HTML report: %v", err)
+			log.Printf("Error: Failed to generate HTML report: %v", err)
+			return
 		}
 		fmt.Printf("   ✅ HTML report saved to: %s\n", filename)
 
@@ -333,7 +335,8 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 		filename := fmt.Sprintf("%s/two-phase-monitoring-report-%s.txt", reportDir, timestamp)
 		generator := report.NewTextGeneratorWithMode(true) // Two-phase mode enabled
 		if err := generator.Generate(filename, combinedResults); err != nil {
-			log.Fatalf("Failed to generate text report: %v", err)
+			log.Printf("Error: Failed to generate text report: %v", err)
+			return
 		}
 		fmt.Printf("   ✅ Text report saved to: %s\n", filename)
 	}
@@ -567,7 +570,8 @@ func runThreePhaseMonitoring(ctx context.Context) {
 	case "json":
 		filename := fmt.Sprintf("%s/three-phase-monitoring-report-%s.json", reportDir, timestamp)
 		if err := saveJSONReport(filename, combinedResults); err != nil {
-			log.Fatalf("Failed to save JSON report: %v", err)
+			log.Printf("Error: Failed to save JSON report: %v", err)
+			return
 		}
 		fmt.Printf("   ✅ JSON report saved to: %s\n", filename)
 
@@ -575,7 +579,8 @@ func runThreePhaseMonitoring(ctx context.Context) {
 		filename := fmt.Sprintf("%s/three-phase-monitoring-report-%s.html", reportDir, timestamp)
 		generator := report.NewHTMLGenerator()
 		if err := generator.Generate(filename, combinedResults); err != nil {
-			log.Fatalf("Failed to generate HTML report: %v", err)
+			log.Printf("Error: Failed to generate HTML report: %v", err)
+			return
 		}
 		fmt.Printf("   ✅ HTML report saved to: %s\n", filename)
 
@@ -583,7 +588,8 @@ func runThreePhaseMonitoring(ctx context.Context) {
 		filename := fmt.Sprintf("%s/three-phase-monitoring-report-%s.txt", reportDir, timestamp)
 		generator := report.NewTextGenerator()
 		if err := generator.Generate(filename, combinedResults); err != nil {
-			log.Fatalf("Failed to generate text report: %v", err)
+			log.Printf("Error: Failed to generate text report: %v", err)
+			return
 		}
 		fmt.Printf("   ✅ Text report saved to: %s\n", filename)
 	}
@@ -867,7 +873,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 	case "json":
 		filename := fmt.Sprintf("%s/six-phase-monitoring-report-%s.json", reportDir, timestamp)
 		if err := saveJSONReport(filename, combinedResults); err != nil {
-			log.Fatalf("Failed to save JSON report: %v", err)
+			log.Printf("Error: Failed to save JSON report: %v", err)
+			return
 		}
 		fmt.Printf("   ✅ JSON report saved to: %s\n", filename)
 
@@ -875,7 +882,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 		filename := fmt.Sprintf("%s/six-phase-monitoring-report-%s.html", reportDir, timestamp)
 		generator := report.NewHTMLGenerator()
 		if err := generator.Generate(filename, combinedResults); err != nil {
-			log.Fatalf("Failed to generate HTML report: %v", err)
+			log.Printf("Error: Failed to generate HTML report: %v", err)
+			return
 		}
 		fmt.Printf("   ✅ HTML report saved to: %s\n", filename)
 
@@ -883,7 +891,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 		filename := fmt.Sprintf("%s/six-phase-monitoring-report-%s.txt", reportDir, timestamp)
 		generator := report.NewTextGenerator()
 		if err := generator.Generate(filename, combinedResults); err != nil {
-			log.Fatalf("Failed to generate text report: %v", err)
+			log.Printf("Error: Failed to generate text report: %v", err)
+			return
 		}
 		fmt.Printf("   ✅ Text report saved to: %s\n", filename)
 	}
