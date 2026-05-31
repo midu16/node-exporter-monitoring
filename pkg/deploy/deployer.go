@@ -26,13 +26,13 @@ const (
 )
 
 type Deployer struct {
-	clientset              *kubernetes.Clientset
-	baseDir                string
-	manifestsDir           string           // Directory containing k8s manifests
-	variant                DaemonSetVariant // Daemonset variant to deploy
-	kubeconfigPath         string           // Path to kubeconfig file
-	originalKustomization  string           // Original kustomization.yaml content
-	kustomizationModified  bool             // Track if we modified kustomization.yaml
+	clientset             *kubernetes.Clientset
+	baseDir               string
+	manifestsDir          string           // Directory containing k8s manifests
+	variant               DaemonSetVariant // Daemonset variant to deploy
+	kubeconfigPath        string           // Path to kubeconfig file
+	originalKustomization string           // Original kustomization.yaml content
+	kustomizationModified bool             // Track if we modified kustomization.yaml
 }
 
 type DeploymentStatus struct {
