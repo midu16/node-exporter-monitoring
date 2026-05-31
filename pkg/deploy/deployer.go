@@ -26,10 +26,13 @@ const (
 )
 
 type Deployer struct {
-	clientset    *kubernetes.Clientset
-	baseDir      string
-	manifestsDir string           // Directory containing k8s manifests
-	variant      DaemonSetVariant // Daemonset variant to deploy
+	clientset              *kubernetes.Clientset
+	baseDir                string
+	manifestsDir           string           // Directory containing k8s manifests
+	variant                DaemonSetVariant // Daemonset variant to deploy
+	kubeconfigPath         string           // Path to kubeconfig file
+	originalKustomization  string           // Original kustomization.yaml content
+	kustomizationModified  bool             // Track if we modified kustomization.yaml
 }
 
 type DeploymentStatus struct {
@@ -72,10 +75,11 @@ func NewDeployer(kubeconfigPath string) *Deployer {
 	manifestsDir := filepath.Join(baseDir, "node-exporter-zoneinfo")
 
 	return &Deployer{
-		clientset:    clientset,
-		baseDir:      baseDir,
-		manifestsDir: manifestsDir,
-		variant:      VariantFull, // Default to full variant
+		clientset:      clientset,
+		baseDir:        baseDir,
+		manifestsDir:   manifestsDir,
+		variant:        VariantFull, // Default to full variant
+		kubeconfigPath: kubeconfig,
 	}
 }
 
@@ -123,9 +127,17 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 	var cmd *exec.Cmd
 	switch {
 	case d.commandExists("kubectl"):
-		cmd = exec.CommandContext(ctx, "kubectl", "apply", "-k", d.manifestsDir)
+		args := []string{"apply", "-k", d.manifestsDir, "--validate=false"}
+		if d.kubeconfigPath != "" {
+			args = append([]string{"--kubeconfig", d.kubeconfigPath}, args...)
+		}
+		cmd = exec.CommandContext(ctx, "kubectl", args...)
 	case d.commandExists("oc"):
-		cmd = exec.CommandContext(ctx, "oc", "apply", "-k", d.manifestsDir)
+		args := []string{"apply", "-k", d.manifestsDir, "--validate=false"}
+		if d.kubeconfigPath != "" {
+			args = append([]string{"--kubeconfig", d.kubeconfigPath}, args...)
+		}
+		cmd = exec.CommandContext(ctx, "oc", args...)
 	default:
 		return fmt.Errorf("neither kubectl nor oc command found")
 	}
@@ -226,9 +238,7 @@ func (d *Deployer) commandExists(cmd string) bool {
 	return err == nil
 }
 
-// ensureVariantKustomization checks if the correct variant is configured
-// This is informational - the kustomization.yaml should be manually edited
-// or we can provide a warning
+// ensureVariantKustomization dynamically updates kustomization.yaml to use the correct variant
 func (d *Deployer) ensureVariantKustomization() error {
 	kustomizationPath := filepath.Join(d.manifestsDir, "kustomization.yaml")
 	content, err := os.ReadFile(kustomizationPath)
@@ -236,9 +246,13 @@ func (d *Deployer) ensureVariantKustomization() error {
 		return fmt.Errorf("failed to read kustomization.yaml: %w", err)
 	}
 
-	contentStr := string(content)
-	var expectedFile string
+	// Save original content on first modification
+	if !d.kustomizationModified {
+		d.originalKustomization = string(content)
+		d.kustomizationModified = true
+	}
 
+	var expectedFile string
 	switch d.variant {
 	case VariantFull:
 		expectedFile = "daemonset.yaml"
@@ -252,32 +266,129 @@ func (d *Deployer) ensureVariantKustomization() error {
 		expectedFile = "daemonset-softirqs-only.yaml"
 	}
 
-	// Check if expected variant file is uncommented
-	if !strings.Contains(contentStr, "- "+expectedFile) ||
-		strings.Contains(contentStr, "#  - "+expectedFile) ||
-		strings.Contains(contentStr, "# - "+expectedFile) {
-		fmt.Printf("⚠️  Warning: Variant '%s' requested but kustomization.yaml may not be configured.\n", d.variant)
-		fmt.Printf("   Please ensure %s is uncommented and other daemonset variants are commented.\n", expectedFile)
-		fmt.Println("   Continuing with current kustomization.yaml configuration...")
+	// Modify kustomization.yaml to use the correct variant
+	modifiedContent := d.updateKustomizationVariant(string(content), expectedFile)
+
+	// Write the modified content back
+	if err := os.WriteFile(kustomizationPath, []byte(modifiedContent), 0o644); err != nil {
+		return fmt.Errorf("failed to write kustomization.yaml: %w", err)
 	}
 
+	fmt.Printf("✅ Configured kustomization.yaml to use: %s\n", expectedFile)
 	return nil
 }
 
+// RestoreKustomization restores the original kustomization.yaml content
+func (d *Deployer) RestoreKustomization() error {
+	if !d.kustomizationModified {
+		return nil // Nothing to restore
+	}
+
+	kustomizationPath := filepath.Join(d.manifestsDir, "kustomization.yaml")
+	if err := os.WriteFile(kustomizationPath, []byte(d.originalKustomization), 0o644); err != nil {
+		return fmt.Errorf("failed to restore kustomization.yaml: %w", err)
+	}
+
+	fmt.Println("✅ Restored original kustomization.yaml")
+	d.kustomizationModified = false
+	return nil
+}
+
+// updateKustomizationVariant modifies the kustomization.yaml content to use the specified variant
+func (d *Deployer) updateKustomizationVariant(content, targetVariant string) string {
+	// All possible daemonset variants
+	variants := []string{
+		"daemonset.yaml",
+		"daemonset-rootless.yaml",
+		"daemonset-zoneinfo-only.yaml",
+		"daemonset-interrupts-only.yaml",
+		"daemonset-softirqs-only.yaml",
+	}
+
+	lines := strings.Split(content, "\n")
+	var result []string
+
+	for _, line := range lines {
+		modifiedLine := line
+
+		// Only process lines that are actual resource declarations (not documentation comments)
+		// Pattern: "  - {variant}" or "  # - {variant}" with nothing after the variant name
+		trimmed := strings.TrimSpace(line)
+
+		// Check if this is a resource line (starts with - or # -)
+		isResourceLine := false
+		lineVariant := ""
+
+		// Remove leading # and spaces to check the actual resource
+		workingLine := trimmed
+		workingLine = strings.TrimPrefix(workingLine, "#")
+		workingLine = strings.TrimSpace(workingLine)
+		workingLine = strings.TrimPrefix(workingLine, "-")
+		workingLine = strings.TrimSpace(workingLine)
+
+		// Check if this line is exactly a variant (no additional text after it)
+		for _, variant := range variants {
+			if workingLine == variant {
+				isResourceLine = true
+				lineVariant = variant
+				break
+			}
+		}
+
+		// Only modify resource lines, not documentation comments
+		if isResourceLine {
+			if lineVariant == targetVariant {
+				// Uncomment the target variant
+				modifiedLine = "  - " + targetVariant
+			} else {
+				// Comment out other variants
+				modifiedLine = "  # - " + lineVariant
+			}
+		}
+
+		result = append(result, modifiedLine)
+	}
+
+	return strings.Join(result, "\n")
+}
+
 func (d *Deployer) Undeploy(ctx context.Context) error {
+	// Check if namespace exists first
+	_, err := d.clientset.CoreV1().Namespaces().Get(ctx, "node-exporter-zoneinfo", metav1.GetOptions{})
+	if err != nil {
+		// Namespace doesn't exist, nothing to clean up
+		fmt.Println("✅ Namespace 'node-exporter-zoneinfo' does not exist - nothing to clean up")
+		return nil
+	}
+
 	var cmd *exec.Cmd
 	switch {
 	case d.commandExists("kubectl"):
-		cmd = exec.CommandContext(ctx, "kubectl", "delete", "-k", d.manifestsDir, "--ignore-not-found=true")
+		args := []string{"delete", "-k", d.manifestsDir, "--ignore-not-found=true"}
+		if d.kubeconfigPath != "" {
+			args = append([]string{"--kubeconfig", d.kubeconfigPath}, args...)
+		}
+		cmd = exec.CommandContext(ctx, "kubectl", args...)
 	case d.commandExists("oc"):
-		cmd = exec.CommandContext(ctx, "oc", "delete", "-k", d.manifestsDir, "--ignore-not-found=true")
+		args := []string{"delete", "-k", d.manifestsDir, "--ignore-not-found=true"}
+		if d.kubeconfigPath != "" {
+			args = append([]string{"--kubeconfig", d.kubeconfigPath}, args...)
+		}
+		cmd = exec.CommandContext(ctx, "oc", args...)
 	default:
 		return fmt.Errorf("neither kubectl nor oc command found")
 	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("undeploy failed: %w\nOutput: %s", err, string(output))
+		// Check if error is due to authentication or permissions
+		outputStr := string(output)
+		if strings.Contains(outputStr, "provide credentials") || strings.Contains(outputStr, "unable to recognize") {
+			fmt.Println("⚠️  Warning: Some resources may not be accessible (authentication/permission issues)")
+			fmt.Println("   Continuing anyway as resources may not exist...")
+			return nil
+		}
+		return fmt.Errorf("undeploy failed: %w\nOutput: %s", err, outputStr)
 	}
 
 	fmt.Printf("✅ Successfully removed node-exporter-zoneinfo resources from %s\n", d.manifestsDir)
@@ -299,11 +410,17 @@ func (d *Deployer) DeleteDaemonSet(ctx context.Context) error {
 	var cmd *exec.Cmd
 	switch {
 	case d.commandExists("kubectl"):
-		cmd = exec.CommandContext(ctx, "kubectl", "delete", "daemonset",
-			"node-exporter-zoneinfo", "-n", "node-exporter-zoneinfo", "--ignore-not-found=true")
+		args := []string{"delete", "daemonset", "node-exporter-zoneinfo", "-n", "node-exporter-zoneinfo", "--ignore-not-found=true"}
+		if d.kubeconfigPath != "" {
+			args = append([]string{"--kubeconfig", d.kubeconfigPath}, args...)
+		}
+		cmd = exec.CommandContext(ctx, "kubectl", args...)
 	case d.commandExists("oc"):
-		cmd = exec.CommandContext(ctx, "oc", "delete", "daemonset",
-			"node-exporter-zoneinfo", "-n", "node-exporter-zoneinfo", "--ignore-not-found=true")
+		args := []string{"delete", "daemonset", "node-exporter-zoneinfo", "-n", "node-exporter-zoneinfo", "--ignore-not-found=true"}
+		if d.kubeconfigPath != "" {
+			args = append([]string{"--kubeconfig", d.kubeconfigPath}, args...)
+		}
+		cmd = exec.CommandContext(ctx, "oc", args...)
 	default:
 		return fmt.Errorf("neither kubectl nor oc command found")
 	}

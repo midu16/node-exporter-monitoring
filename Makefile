@@ -100,6 +100,27 @@ two-phase-quick: build ## Quick two-phase test (2 min per phase)
 	@mkdir -p reports
 	$(BUILD_DIR)/$(BINARY_NAME) --kubeconfig=$(KUBECONFIG) --two-phase --duration=2m
 
+three-phase-monitor: build ## Run three-phase monitoring (Phase 1: all, Phase 2: none, Phase 3: zoneinfo)
+	@echo "Starting three-phase monitoring (90 minutes total)..."
+	@mkdir -p reports
+	$(BUILD_DIR)/$(BINARY_NAME) --kubeconfig=$(KUBECONFIG) --three-phase --duration=30m
+
+three-phase-quick: build ## Quick three-phase test (2 min per phase)
+	@echo "Starting quick three-phase test (6 minutes total)..."
+	@mkdir -p reports
+	$(BUILD_DIR)/$(BINARY_NAME) --kubeconfig=$(KUBECONFIG) --three-phase --duration=2m
+
+six-phase-monitor: build ## Run six-phase monitoring (comprehensive test - 180 minutes)
+	@echo "Starting six-phase monitoring (180 minutes total)..."
+	@echo "Phases: no-exporter → all → no-exporter → zoneinfo → interrupts → softirqs"
+	@mkdir -p reports
+	$(BUILD_DIR)/$(BINARY_NAME) --kubeconfig=$(KUBECONFIG) --six-phase --duration=30m
+
+six-phase-quick: build ## Quick six-phase test (2 min per phase = 12 min total)
+	@echo "Starting quick six-phase test (12 minutes total)..."
+	@mkdir -p reports
+	$(BUILD_DIR)/$(BINARY_NAME) --kubeconfig=$(KUBECONFIG) --six-phase --duration=2m
+
 view-charts: ## Open generated charts in default viewer
 	@echo "Opening charts..."
 	@if [ -d "reports/charts" ]; then \
@@ -129,4 +150,4 @@ verify: fmt vet test ## Run all verification steps (fmt, vet, test)
 
 all: clean verify build ## Clean, verify, and build
 
-.PHONY: deps build test test-coverage fmt vet lint clean deploy undeploy monitor monitor-deploy quick-test two-phase-monitor two-phase-quick view-charts list-charts show-mapping verify all
+.PHONY: deps build test test-coverage fmt vet lint clean deploy undeploy monitor monitor-deploy quick-test two-phase-monitor two-phase-quick three-phase-monitor three-phase-quick six-phase-monitor six-phase-quick view-charts list-charts show-mapping verify all

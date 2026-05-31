@@ -2,6 +2,46 @@
 
 Supplementary node_exporter that exposes **zoneinfo**, **interrupts**, and **softirqs** (port 9101) when the cluster-monitoring-config does not support these collectors. Deploys into **node-exporter-zoneinfo** namespace. The kustomization includes a ClusterRoleBinding that grants the privileged SCC to the default service account so the DaemonSet can use hostPID/hostPath.
 
+## Monitoring & Testing Modes
+
+This repository includes a comprehensive monitoring tool that supports multiple test scenarios:
+
+- **Single-phase**: Standard monitoring of deployed resources (30 min default)
+- **Two-phase**: With/without node-exporter comparison (60 min)
+- **Three-phase**: All collectors + baseline + single collector (90 min)
+- **Six-phase**: Comprehensive test of all collector configurations (180 min)
+
+**Documentation**:
+- [COMPLETE_ENHANCEMENTS.md](COMPLETE_ENHANCEMENTS.md) - **⭐ START HERE** - Complete enhancement summary
+- [SIX_PHASE_MONITORING.md](SIX_PHASE_MONITORING.md) - Detailed six-phase monitoring guide
+- [OUTPUTS_GUIDE.md](OUTPUTS_GUIDE.md) - Complete output files reference
+- [OUTPUT_STRUCTURE.md](OUTPUT_STRUCTURE.md) - Detailed output structure and data format
+- [DYNAMIC_KUSTOMIZATION.md](DYNAMIC_KUSTOMIZATION.md) - Automatic kustomization.yaml management
+- [KUBECONFIG_FIX.md](KUBECONFIG_FIX.md) - Kubeconfig authentication fix
+
+**All monitoring runs automatically** (zero manual configuration):
+- ✅ **Raw metrics JSON** - Real-time streaming of ALL samples (complete historical data)
+- ✅ **Analysis reports** - User-selected format (text/html/json)
+- ✅ **PNG charts** - Visual timelines for each monitored pod
+- ✅ **Dynamic configuration** - Automatic kustomization.yaml updates per phase
+- ✅ **Clean output** - No scary error messages, professional logging
+- ✅ **Automatic restoration** - Original configuration preserved after completion
+
+### Quick Start - Six-Phase Monitoring
+
+```bash
+# Build and run full 3-hour test
+make build
+./bin/monitor --six-phase
+
+# Or use Makefile targets
+make six-phase-monitor      # Full 180-minute test
+make six-phase-quick        # Quick 12-minute test
+
+# Quick test (5 min per phase = 30 min total)
+./bin/monitor --six-phase --duration 5m --interval 15s
+```
+
 ## Apply
 
 ```bash

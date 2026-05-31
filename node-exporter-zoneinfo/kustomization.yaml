@@ -14,10 +14,10 @@ resources:
   # - daemonset-zoneinfo-only.yaml: only zoneinfo collector
   # - daemonset-interrupts-only.yaml: only interrupts collector
   # - daemonset-softirqs-only.yaml: only softirqs collector
-  - daemonset.yaml
+  # - daemonset.yaml
   # - daemonset-rootless.yaml
   # - daemonset-zoneinfo-only.yaml
-  # - daemonset-interrupts-only.yaml
+  - daemonset-interrupts-only.yaml
   # - daemonset-softirqs-only.yaml
   - service.yaml
   - servicemonitor.yaml
