@@ -144,6 +144,16 @@ func createDeployerWithVariant(variant deploy.DaemonSetVariant) *deploy.Deployer
 func runTwoPhaseMonitoring(ctx context.Context) {
 	deployer := createDeployer()
 
+	// CRITICAL: Ensure kustomization.yaml is ALWAYS restored
+	defer func() {
+		fmt.Println()
+		fmt.Println("🔄 Restoring original configuration...")
+		if err := deployer.RestoreKustomization(); err != nil {
+			log.Printf("Warning: Failed to restore kustomization.yaml: %v", err)
+			log.Println("   Please manually restore: git checkout node-exporter-zoneinfo/kustomization.yaml")
+		}
+	}()
+
 	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
 	fmt.Println("║              TWO-PHASE MONITORING MODE                        ║")
 	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
@@ -284,13 +294,7 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 	combinedResults.Duration = combinedResults.EndTime.Sub(combinedResults.StartTime)
 	combinedResults.SampleCount = len(combinedResults.Samples)
 
-	// ==================== CLEANUP AND RESTORE ====================
-	// Restore original kustomization.yaml
-	fmt.Println()
-	fmt.Println("🔄 Restoring original configuration...")
-	if err := deployer.RestoreKustomization(); err != nil {
-		log.Printf("Warning: Failed to restore kustomization.yaml: %v", err)
-	}
+	// Note: Restoration happens in defer() at function start
 
 	// ==================== GENERATE COMBINED REPORT ====================
 	fmt.Println()
@@ -416,6 +420,16 @@ func runMonitoringPhase(ctx context.Context, collector *metrics.Collector, targe
 func runThreePhaseMonitoring(ctx context.Context) {
 	deployer := createDeployerWithVariant(deploy.VariantFull)
 
+	// CRITICAL: Ensure kustomization.yaml is ALWAYS restored
+	defer func() {
+		fmt.Println()
+		fmt.Println("🔄 Restoring original configuration...")
+		if err := deployer.RestoreKustomization(); err != nil {
+			log.Printf("Warning: Failed to restore kustomization.yaml: %v", err)
+			log.Println("   Please manually restore: git checkout node-exporter-zoneinfo/kustomization.yaml")
+		}
+	}()
+
 	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
 	fmt.Println("║            THREE-PHASE MONITORING MODE                        ║")
 	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
@@ -515,13 +529,7 @@ func runThreePhaseMonitoring(ctx context.Context) {
 	combinedResults.Samples = append(combinedResults.Samples, phase3Results.Samples...)
 	combinedResults.Errors = append(combinedResults.Errors, phase3Results.Errors...)
 
-	// ==================== CLEANUP AND RESTORE ====================
-	// Restore original kustomization.yaml
-	fmt.Println()
-	fmt.Println("🔄 Restoring original configuration...")
-	if err := zoneinfoDeployer.RestoreKustomization(); err != nil {
-		log.Printf("Warning: Failed to restore kustomization.yaml: %v", err)
-	}
+	// Note: Restoration happens in defer() at function start
 
 	// ==================== GENERATE COMBINED REPORT ====================
 	combinedResults.EndTime = time.Now()
@@ -602,6 +610,19 @@ func runSixPhaseMonitoring(ctx context.Context) {
 	fmt.Println("║              SIX-PHASE MONITORING MODE                        ║")
 	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
 	fmt.Println()
+
+	// Create a deployer for restoration - ensure it's available even if phases fail
+	restorationDeployer := createDeployerWithVariant(deploy.VariantFull)
+
+	// CRITICAL: Ensure kustomization.yaml is ALWAYS restored, even on panic or interruption
+	defer func() {
+		fmt.Println()
+		fmt.Println("🔄 Restoring original configuration...")
+		if err := restorationDeployer.RestoreKustomization(); err != nil {
+			log.Printf("Warning: Failed to restore kustomization.yaml: %v", err)
+			log.Println("   Please manually restore: git checkout node-exporter-zoneinfo/kustomization.yaml")
+		}
+	}()
 
 	// Define monitoring targets - same for all phases
 	allTargets := []metrics.PodTarget{
@@ -790,13 +811,7 @@ func runSixPhaseMonitoring(ctx context.Context) {
 	combinedResults.Samples = append(combinedResults.Samples, phase6Results.Samples...)
 	combinedResults.Errors = append(combinedResults.Errors, phase6Results.Errors...)
 
-	// ==================== CLEANUP AND RESTORE ====================
-	// Restore original kustomization.yaml
-	fmt.Println()
-	fmt.Println("🔄 Restoring original configuration...")
-	if err := softirqsDeployer.RestoreKustomization(); err != nil {
-		log.Printf("Warning: Failed to restore kustomization.yaml: %v", err)
-	}
+	// Note: Restoration happens in defer() at function start - no explicit call needed here
 
 	// ==================== GENERATE COMBINED REPORT ====================
 	combinedResults.EndTime = time.Now()
