@@ -94,16 +94,16 @@ func (c *Collector) SetRawMetricsFile(file *os.File) {
 	c.encoderMutex.Lock()
 	defer c.encoderMutex.Unlock()
 
-	fmt.Fprintf(c.rawMetricsFile, "{\n")
-	fmt.Fprintf(c.rawMetricsFile, "  \"monitoring_session\": {\n")
-	fmt.Fprintf(c.rawMetricsFile, "    \"start_time\": %q,\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(c.rawMetricsFile, "    \"sample_interval_seconds\": %d\n", int(c.sampleInterval.Seconds()))
-	fmt.Fprintf(c.rawMetricsFile, "  },\n")
-	fmt.Fprintf(c.rawMetricsFile, "  \"samples\": [\n")
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "{\n")
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "  \"monitoring_session\": {\n")
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "    \"start_time\": %q,\n", time.Now().Format(time.RFC3339))
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "    \"sample_interval_seconds\": %d\n", int(c.sampleInterval.Seconds()))
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "  },\n")
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "  \"samples\": [\n")
 }
 
 // streamSample writes a single sample to the JSON file in real-time
-func (c *Collector) streamSample(sample ResourceSample) {
+func (c *Collector) streamSample(sample *ResourceSample) {
 	if !c.streamingActive || c.rawMetricsFile == nil {
 		return
 	}
@@ -118,7 +118,7 @@ func (c *Collector) streamSample(sample ResourceSample) {
 	}
 
 	// Write with comma (we'll handle the last one during finalization)
-	fmt.Fprintf(c.rawMetricsFile, "    %s,\n", sampleJSON)
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "    %s,\n", sampleJSON)
 }
 
 // finalizeRawMetricsFile closes the JSON structure properly
@@ -131,17 +131,17 @@ func (c *Collector) finalizeRawMetricsFile(results *MonitoringResults) {
 	defer c.encoderMutex.Unlock()
 
 	// Remove trailing comma by seeking back (simplified approach: write summary)
-	fmt.Fprintf(c.rawMetricsFile, "    null\n")
-	fmt.Fprintf(c.rawMetricsFile, "  ],\n")
-	fmt.Fprintf(c.rawMetricsFile, "  \"summary\": {\n")
-	fmt.Fprintf(c.rawMetricsFile, "    \"end_time\": %q,\n", results.EndTime.Format(time.RFC3339))
-	fmt.Fprintf(c.rawMetricsFile, "    \"duration_seconds\": %.2f,\n", results.Duration.Seconds())
-	fmt.Fprintf(c.rawMetricsFile, "    \"total_samples\": %d,\n", results.SampleCount)
-	fmt.Fprintf(c.rawMetricsFile, "    \"error_count\": %d\n", len(results.Errors))
-	fmt.Fprintf(c.rawMetricsFile, "  }\n")
-	fmt.Fprintf(c.rawMetricsFile, "}\n")
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "    null\n")
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "  ],\n")
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "  \"summary\": {\n")
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "    \"end_time\": %q,\n", results.EndTime.Format(time.RFC3339))
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "    \"duration_seconds\": %.2f,\n", results.Duration.Seconds())
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "    \"total_samples\": %d,\n", results.SampleCount)
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "    \"error_count\": %d\n", len(results.Errors))
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "  }\n")
+	_, _ = fmt.Fprintf(c.rawMetricsFile, "}\n")
 
-	c.rawMetricsFile.Sync() // Ensure everything is written to disk
+	_ = c.rawMetricsFile.Sync() // Ensure everything is written to disk
 }
 
 func (c *Collector) Collect(ctx context.Context, targets []PodTarget, duration time.Duration) (*MonitoringResults, error) {
@@ -183,8 +183,8 @@ func (c *Collector) Collect(ctx context.Context, targets []PodTarget, duration t
 			results.Errors = append(results.Errors, errors...)
 
 			// Stream each sample to JSON file in real-time
-			for _, sample := range samples {
-				c.streamSample(sample)
+			for i := range samples {
+				c.streamSample(&samples[i])
 			}
 
 			elapsed := time.Since(results.StartTime)

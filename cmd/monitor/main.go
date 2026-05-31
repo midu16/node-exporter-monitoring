@@ -225,7 +225,11 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 	if err != nil {
 		log.Fatalf("Failed to create raw metrics JSON file: %v", err)
 	}
-	defer jsonFile.Close()
+	defer func() {
+		if closeErr := jsonFile.Close(); closeErr != nil {
+			log.Printf("Warning: Failed to close raw metrics file: %v", closeErr)
+		}
+	}()
 
 	// Set the streaming file in collector (will capture ALL samples across both phases)
 	collector.SetRawMetricsFile(jsonFile)
@@ -238,7 +242,8 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 	phase1Start := time.Now()
 	phase1Results, err := collector.Collect(ctx, allTargets, *duration)
 	if err != nil && err != context.Canceled {
-		log.Fatalf("Phase 1 monitoring failed: %v", err)
+		log.Printf("Error: Phase 1 monitoring failed: %v", err)
+		return
 	}
 	phase1Duration := time.Since(phase1Start)
 
@@ -275,7 +280,8 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 	phase2Start := time.Now()
 	phase2Results, err := collector.Collect(ctx, allTargets, *duration)
 	if err != nil && err != context.Canceled {
-		log.Fatalf("Phase 2 monitoring failed: %v", err)
+		log.Printf("Error: Phase 2 monitoring failed: %v", err)
+		return
 	}
 	phase2Duration := time.Since(phase2Start)
 
@@ -444,7 +450,8 @@ func runThreePhaseMonitoring(ctx context.Context) {
 
 	cleanupResources(ctx, deployer)
 	if err := deployAndVerify(ctx, deployer, "all collectors"); err != nil {
-		log.Fatalf("Phase 1 deployment failed: %v", err)
+		log.Printf("Error: Phase 1 deployment failed: %v", err)
+		return
 	}
 
 	// Define monitoring targets
@@ -470,7 +477,11 @@ func runThreePhaseMonitoring(ctx context.Context) {
 	if err != nil {
 		log.Fatalf("Failed to create raw metrics JSON file: %v", err)
 	}
-	defer jsonFile.Close()
+	defer func() {
+		if closeErr := jsonFile.Close(); closeErr != nil {
+			log.Printf("Warning: Failed to close raw metrics file: %v", closeErr)
+		}
+	}()
 
 	// Set the streaming file in collector (will capture ALL samples across all phases)
 	collector.SetRawMetricsFile(jsonFile)
@@ -478,7 +489,8 @@ func runThreePhaseMonitoring(ctx context.Context) {
 	// ==================== PHASE 1: Monitoring ====================
 	phase1Results, phase1Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 1")
 	if err != nil {
-		log.Fatalf("%v", err)
+		log.Printf("Error: %v", err)
+		return
 	}
 
 	combinedResults.Samples = append(combinedResults.Samples, phase1Results.Samples...)
@@ -494,7 +506,8 @@ func runThreePhaseMonitoring(ctx context.Context) {
 
 	fmt.Println("🗑️  Removing all node-exporter-zoneinfo resources...")
 	if err := deployer.Undeploy(ctx); err != nil {
-		log.Fatalf("Failed to undeploy: %v", err)
+		log.Printf("Error: Failed to undeploy: %v", err)
+		return
 	}
 	fmt.Println("✅ Resources removed successfully")
 	time.Sleep(10 * time.Second)
@@ -502,7 +515,8 @@ func runThreePhaseMonitoring(ctx context.Context) {
 
 	phase2Results, phase2Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 2")
 	if err != nil {
-		log.Fatalf("%v", err)
+		log.Printf("Error: %v", err)
+		return
 	}
 
 	combinedResults.Samples = append(combinedResults.Samples, phase2Results.Samples...)
@@ -518,12 +532,14 @@ func runThreePhaseMonitoring(ctx context.Context) {
 
 	zoneinfoDeployer := createDeployerWithVariant(deploy.VariantZoneinfoOnly)
 	if err := deployAndVerify(ctx, zoneinfoDeployer, "zoneinfo collector only"); err != nil {
-		log.Fatalf("Phase 3 deployment failed: %v", err)
+		log.Printf("Error: Phase 3 deployment failed: %v", err)
+		return
 	}
 
 	phase3Results, phase3Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 3")
 	if err != nil {
-		log.Fatalf("%v", err)
+		log.Printf("Error: %v", err)
+		return
 	}
 
 	combinedResults.Samples = append(combinedResults.Samples, phase3Results.Samples...)
@@ -647,7 +663,11 @@ func runSixPhaseMonitoring(ctx context.Context) {
 	if err != nil {
 		log.Fatalf("Failed to create raw metrics JSON file: %v", err)
 	}
-	defer jsonFile.Close()
+	defer func() {
+		if closeErr := jsonFile.Close(); closeErr != nil {
+			log.Printf("Warning: Failed to close raw metrics file: %v", closeErr)
+		}
+	}()
 
 	// Set the streaming file in collector (will capture ALL samples across all six phases)
 	collector.SetRawMetricsFile(jsonFile)
@@ -669,7 +689,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 
 	phase1Results, phase1Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 1")
 	if err != nil {
-		log.Fatalf("%v", err)
+		log.Printf("Error: %v", err)
+		return
 	}
 	phaseDurations[0] = phase1Duration
 	phaseSampleCounts[0] = len(phase1Results.Samples)
@@ -692,7 +713,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 
 	phase2Results, phase2Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 2")
 	if err != nil {
-		log.Fatalf("%v", err)
+		log.Printf("Error: %v", err)
+		return
 	}
 	phaseDurations[1] = phase2Duration
 	phaseSampleCounts[1] = len(phase2Results.Samples)
@@ -718,7 +740,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 
 	phase3Results, phase3Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 3")
 	if err != nil {
-		log.Fatalf("%v", err)
+		log.Printf("Error: %v", err)
+		return
 	}
 	phaseDurations[2] = phase3Duration
 	phaseSampleCounts[2] = len(phase3Results.Samples)
@@ -741,7 +764,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 
 	phase4Results, phase4Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 4")
 	if err != nil {
-		log.Fatalf("%v", err)
+		log.Printf("Error: %v", err)
+		return
 	}
 	phaseDurations[3] = phase4Duration
 	phaseSampleCounts[3] = len(phase4Results.Samples)
@@ -772,7 +796,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 
 	phase5Results, phase5Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 5")
 	if err != nil {
-		log.Fatalf("%v", err)
+		log.Printf("Error: %v", err)
+		return
 	}
 	phaseDurations[4] = phase5Duration
 	phaseSampleCounts[4] = len(phase5Results.Samples)
@@ -803,7 +828,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 
 	phase6Results, phase6Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 6")
 	if err != nil {
-		log.Fatalf("%v", err)
+		log.Printf("Error: %v", err)
+		return
 	}
 	phaseDurations[5] = phase6Duration
 	phaseSampleCounts[5] = len(phase6Results.Samples)
@@ -969,14 +995,19 @@ func runMonitoring(ctx context.Context, targets []metrics.PodTarget, duration ti
 	if err != nil {
 		log.Fatalf("Failed to create raw metrics JSON file: %v", err)
 	}
-	defer jsonFile.Close()
+	defer func() {
+		if closeErr := jsonFile.Close(); closeErr != nil {
+			log.Printf("Warning: Failed to close raw metrics file: %v", closeErr)
+		}
+	}()
 
 	// Set the streaming file in collector
 	collector.SetRawMetricsFile(jsonFile)
 
 	results, err := collector.Collect(ctx, targets, duration)
 	if err != nil && err != context.Canceled {
-		log.Fatalf("Monitoring failed: %v", err)
+		log.Printf("Error: Monitoring failed: %v", err)
+		return nil
 	}
 	actualDuration := time.Since(startTime)
 
