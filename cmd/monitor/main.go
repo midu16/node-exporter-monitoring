@@ -267,7 +267,8 @@ func runTwoPhaseMonitoring(ctx context.Context) {
 	// Delete node-exporter-zoneinfo DaemonSet
 	fmt.Println("🗑️  Removing node-exporter-zoneinfo DaemonSet...")
 	if err := deployer.DeleteDaemonSet(ctx); err != nil {
-		log.Fatalf("Failed to delete DaemonSet: %v", err)
+		log.Printf("Error: Failed to delete DaemonSet: %v", err)
+		return
 	}
 	fmt.Println("✅ DaemonSet removed successfully")
 	fmt.Println()
@@ -708,7 +709,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 
 	fullDeployer := createDeployerWithVariant(deploy.VariantFull)
 	if err := deployAndVerify(ctx, fullDeployer, "all collectors"); err != nil {
-		log.Fatalf("Phase 2 deployment failed: %v", err)
+		log.Printf("Error: Phase 2 deployment failed: %v", err)
+		return
 	}
 
 	phase2Results, phase2Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 2")
@@ -732,7 +734,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 
 	fmt.Println("🗑️  Removing all node-exporter-zoneinfo resources...")
 	if err := fullDeployer.Undeploy(ctx); err != nil {
-		log.Fatalf("Failed to undeploy: %v", err)
+		log.Printf("Error: Failed to undeploy: %v", err)
+		return
 	}
 	fmt.Println("✅ Resources removed successfully")
 	time.Sleep(10 * time.Second)
@@ -759,7 +762,8 @@ func runSixPhaseMonitoring(ctx context.Context) {
 
 	zoneinfoDeployer := createDeployerWithVariant(deploy.VariantZoneinfoOnly)
 	if err := deployAndVerify(ctx, zoneinfoDeployer, "zoneinfo collector only"); err != nil {
-		log.Fatalf("Phase 4 deployment failed: %v", err)
+		log.Printf("Error: Phase 4 deployment failed: %v", err)
+		return
 	}
 
 	phase4Results, phase4Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 4")
@@ -784,14 +788,16 @@ func runSixPhaseMonitoring(ctx context.Context) {
 	// Clean up zoneinfo deployment first
 	fmt.Println("🗑️  Removing zoneinfo-only deployment...")
 	if err := zoneinfoDeployer.Undeploy(ctx); err != nil {
-		log.Fatalf("Failed to undeploy zoneinfo variant: %v", err)
+		log.Printf("Error: Failed to undeploy zoneinfo variant: %v", err)
+		return
 	}
 	fmt.Println("✅ Resources removed successfully")
 	time.Sleep(10 * time.Second)
 
 	interruptsDeployer := createDeployerWithVariant(deploy.VariantInterruptsOnly)
 	if err := deployAndVerify(ctx, interruptsDeployer, "interrupts collector only"); err != nil {
-		log.Fatalf("Phase 5 deployment failed: %v", err)
+		log.Printf("Error: Phase 5 deployment failed: %v", err)
+		return
 	}
 
 	phase5Results, phase5Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 5")
@@ -816,14 +822,16 @@ func runSixPhaseMonitoring(ctx context.Context) {
 	// Clean up interrupts deployment first
 	fmt.Println("🗑️  Removing interrupts-only deployment...")
 	if err := interruptsDeployer.Undeploy(ctx); err != nil {
-		log.Fatalf("Failed to undeploy interrupts variant: %v", err)
+		log.Printf("Error: Failed to undeploy interrupts variant: %v", err)
+		return
 	}
 	fmt.Println("✅ Resources removed successfully")
 	time.Sleep(10 * time.Second)
 
 	softirqsDeployer := createDeployerWithVariant(deploy.VariantSoftirqsOnly)
 	if err := deployAndVerify(ctx, softirqsDeployer, "softirqs collector only"); err != nil {
-		log.Fatalf("Phase 6 deployment failed: %v", err)
+		log.Printf("Error: Phase 6 deployment failed: %v", err)
+		return
 	}
 
 	phase6Results, phase6Duration, err := runMonitoringPhase(ctx, collector, allTargets, "Phase 6")
